@@ -151,6 +151,52 @@ class DeepSIC(DetectorBase):
             predictions = self.layer_transition(layer_idx, rx, predictions)
         return predictions.transpose((1, 0, 2))
 
+    def fit(self, rx: Array, labels: Array, train_block_fn: callable, **kwargs) -> None:
+        """Train each block independently using the provided train_block_fn method.
+        Training is performed layer-by-layer, with parallel updates for user blocks within each layer.
+
+        Args:
+            rx (Array): Received signal(s).
+            labels (Array): True labels corresponding to the received signal(s).
+            train_block_fn (callable): Function to train a single block.
+            kwargs: Additional arguments for the training function.
+        """
+
+        rx = jnp.atleast_2d(rx)
+        labels = labels.reshape((rx.shape[0], self.num_users, self.symbol_bits))
+
+        def update_user_block(user_params, inputs, labels):
+            return train_block_fn(
+                user_params,
+                self.unravel_fn,
+                self.block_model.apply,
+                inputs,
+                labels,
+                **kwargs
+            )
+
+        def train_layer(layer_idx, pred):
+
+            layer_params = self.params[layer_idx]
+            inputs = self._pred_and_rx_to_input(layer_idx, rx, pred)
+
+            new_layer_params = jax.vmap(
+                update_user_block, in_axes=(0, None, 1))(
+                layer_params,
+                inputs,
+                labels
+            )
+
+            self.params = self.params.at[layer_idx].set(new_layer_params)
+
+            new_pred = self.layer_transition(layer_idx, rx, pred)
+            return new_pred
+
+        # Loop over the layers and train each layer.
+        predictions = None
+        for layer_idx in range(self.num_layers):
+            predictions = train_layer(layer_idx, predictions)
+
     def save(self, path: str):
         """Save the detector parameters to disk.
 

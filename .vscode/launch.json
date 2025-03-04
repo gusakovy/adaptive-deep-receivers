@@ -14,5 +14,17 @@
             ],
             "console": "integratedTerminal"
         },
+        {
+            "name": "Python Debugger: Integration Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "adr/tests/integration",
+                "-rP",
+                "-v"
+            ],
+            "console": "integratedTerminal"
+        }
     ]
 }

@@ -15,8 +15,11 @@ logger.info("Package initialized")
 
 
 from adr.src.detectors import DeepSICBlock, DeepSIC
+from adr.src.trainers import minibatch_gradient_descent
 
 __all__ = [
     DeepSICBlock,
-    DeepSIC
+    DeepSIC,
+
+    minibatch_gradient_descent
 ]

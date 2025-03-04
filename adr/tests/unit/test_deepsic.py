@@ -50,25 +50,31 @@ class TestDeepSIC(unittest.TestCase):
             num_layers=5,
             hidden_dim=8,
         )
-
-    def test_inference(self):
-        rx = jnp.stack([
+        self.rx = jnp.stack([
             jnp.ones(self.deepsic_model.rx_size),
             -jnp.ones(self.deepsic_model.rx_size)
         ])
-        soft_decisions = self.deepsic_model.soft_decode(rx)
-        self.assertEqual(soft_decisions.shape[0], rx.shape[0])
+
+    def test_inference(self):
+        soft_decisions = self.deepsic_model.soft_decode(self.rx)
+        self.assertEqual(soft_decisions.shape[0], self.rx.shape[0])
         self.assertEqual(soft_decisions.shape[1], self.deepsic_model.num_users)
         self.assertEqual(soft_decisions.shape[2], self.deepsic_model.symbol_bits)
 
     def test_batched_inference(self):
-        rx_single = jnp.stack([
-            jnp.ones(self.deepsic_model.rx_size),
-            -jnp.ones(self.deepsic_model.rx_size)
-        ])
-        batch_rx = jnp.stack([rx_single, 2 * rx_single, 3 * rx_single])
+        batch_rx = jnp.stack([self.rx, 2 * self.rx, 3 * self.rx])
         batch_soft_decisions = jax.vmap(self.deepsic_model.soft_decode)(batch_rx)
         self.assertEqual(batch_soft_decisions.shape[0], batch_rx.shape[0])
-        self.assertEqual(batch_soft_decisions.shape[1], rx_single.shape[0])
+        self.assertEqual(batch_soft_decisions.shape[1], self.rx.shape[0])
         self.assertEqual(batch_soft_decisions.shape[2], self.deepsic_model.num_users)
         self.assertEqual(batch_soft_decisions.shape[3], self.deepsic_model.symbol_bits)
+
+    def test_inference_consistency(self):
+        soft_decisions = self.deepsic_model.soft_decode(self.rx)
+        soft_decisions_again = self.deepsic_model.soft_decode(self.rx)
+        self.assertTrue(jnp.allclose(soft_decisions, soft_decisions_again))
+
+    def test_partial_consistency(self):
+        soft_decisions_two_layers = self.deepsic_model.soft_decode(self.rx, first_layers=2)
+        soft_decisions_four_layers = self.deepsic_model.soft_decode(self.rx, first_layers=4)
+        self.assertFalse(jnp.allclose(soft_decisions_two_layers, soft_decisions_four_layers))
