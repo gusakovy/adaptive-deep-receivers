@@ -13,16 +13,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.info("Package initialized")
 
-
-from adr.src.detectors import DeepSICBlock, DeepSIC
-from adr.src.trainers import minibatch_gradient_descent
+from adr.src.detectors import CovarianceType,DeepSICBlock, DeepSIC
+from adr.src.training_algorithms import minibatch_sgd, iterative_ekf, fg_bong, fg_bog, fg_bbb
 from adr.src.channels import Channel, UplinkMimoChannel
 
 __all__ = [
+    CovarianceType,
     DeepSICBlock,
     DeepSIC,
 
-    minibatch_gradient_descent,
+    minibatch_sgd,
+    iterative_ekf,
+    fg_bong,
+    fg_bog,
+    fg_bbb,
 
     Channel,
     UplinkMimoChannel

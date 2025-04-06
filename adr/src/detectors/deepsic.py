@@ -1,13 +1,19 @@
 import os
+from enum import Enum
 import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 from jax.flatten_util import ravel_pytree
 from flax import linen as nn
-from adr.src.detectors.base import DetectorBase
+from adr.src.detectors.base import Detector
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+
+class CovarianceType(Enum):
+    NONE = None
+    FULL = "full"
 
 
 class DeepSICBlock(nn.Module):
@@ -36,7 +42,7 @@ class DeepSICBlock(nn.Module):
         return nn.Dense(self.features[-1])(x)
 
 
-class DeepSIC(DetectorBase):
+class DeepSIC(Detector):
     """DeepSIC model from https://ieeexplore.ieee.org/document/9242305 with bitwise outputs and 
     connections between blocks of the same user in adjacent layers.
 
@@ -47,6 +53,7 @@ class DeepSIC(DetectorBase):
         num_antennas (int): Number of receive antennas.
         num_layers (int): Number of soft interference cancellation (SIC) layers.
         hidden_dim (int): Size of the hidden layer of each block.
+        cov_type (CovarianceType, optional): Type of covariance for the parameters. Defaults to CovarianceType.NONE.
     """
 
     def __init__(
@@ -57,6 +64,7 @@ class DeepSIC(DetectorBase):
             num_antennas: int,
             num_layers: int,
             hidden_dim: int,
+            cov_type: CovarianceType = CovarianceType.NONE,
         ):
         self.symbol_bits = symbol_bits
         self.num_users = num_users
@@ -83,6 +91,26 @@ class DeepSIC(DetectorBase):
 
         self.params = jnp.stack(flat_params_list).reshape((self.num_layers, self.num_users, -1))
         self.param_size = self.params.shape[-1]
+        self.cov_type = cov_type
+        self.params_cov = None
+
+    def init_params_cov(self, init_cov: float | Array):
+        """Initialize the covariance matrices for the parameters of each DeepSICBlock.
+
+        Args:
+            init_cov (float | Array): Initial covariance scale or matrix or array of matrices of size num_layers x num_users.
+        """
+        if isinstance(init_cov, float) or init_cov.shape == (self.param_size, self.param_size):
+            if isinstance(init_cov, float):
+                init_cov = init_cov * jnp.eye(self.param_size)
+            self.params_cov = jnp.tile(0.1 * jnp.eye(self.param_size), (self.num_layers, self.num_users, 1, 1))
+            self.params_cov = self.params_cov.reshape(self.num_layers, self.num_users, self.param_size, self.param_size)
+        elif init_cov.shape == (self.num_layers, self.num_users, self.param_size, self.param_size):
+            self.params_cov = init_cov
+        else:
+            raise ValueError(f"Invalid shape for init_cov. Expected float, or array of shape (param_size, param_size) = ({self.param_size},{self.param_size})"
+                             f"or (num_layers, num_users, param_size, param_size) = ({self.num_layers},{self.num_users},{self.param_size},{self.param_size})."
+                             f"Got {init_cov.shape}.")
 
     def _pred_and_rx_to_input(self, layer_num: int, rx: Array, pred: Array = None) -> Array:
         """Prepare shared input(s) for all blocks in a layer.
@@ -106,7 +134,7 @@ class DeepSIC(DetectorBase):
 
     def _block_soft_decode(self, params: Array, inputs: Array) -> Array:
         """Soft-decode using a single block.
-        
+
         Args:
             params (Array): Block parameters.
             inputs (Array): Block input(s).
@@ -159,11 +187,13 @@ class DeepSIC(DetectorBase):
             rx (Array): Received signal(s).
             labels (Array): True labels corresponding to the received signal(s).
             train_block_fn (callable): Function to train a single block.
-            kwargs: Additional arguments for the training function.
+            **kwargs: Additional arguments for the training function.
         """
-
         rx = jnp.atleast_2d(rx)
         labels = labels.reshape((rx.shape[0], self.num_users, self.symbol_bits))
+
+        if self.cov_type == CovarianceType.FULL and self.params_cov is None:
+            self.init_params_cov(0.0)
 
         def update_user_block(user_params, inputs, labels):
             return train_block_fn(
@@ -176,18 +206,15 @@ class DeepSIC(DetectorBase):
             )
 
         def train_layer(layer_idx, pred):
-
             layer_params = self.params[layer_idx]
             inputs = self._pred_and_rx_to_input(layer_idx, rx, pred)
+            new_layer_params = jax.vmap(update_user_block, in_axes=(0, None, 1))(layer_params,inputs,labels)
 
-            new_layer_params = jax.vmap(
-                update_user_block, in_axes=(0, None, 1))(
-                layer_params,
-                inputs,
-                labels
-            )
-
-            self.params = self.params.at[layer_idx].set(new_layer_params)
+            if self.cov_type == CovarianceType.FULL:
+                self.params = self.params.at[layer_idx].set(new_layer_params[0])
+                self.params_cov = self.params_cov.at[layer_idx].set(new_layer_params[1])
+            else:
+                self.params = self.params.at[layer_idx].set(new_layer_params)
 
             new_pred = self.layer_transition(layer_idx, rx, pred)
             return new_pred

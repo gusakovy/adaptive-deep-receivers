@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
-class DetectorBase(ABC):
+
+class Detector(ABC):
     """
     Base class for a detector.
     """

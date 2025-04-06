@@ -2,13 +2,11 @@ import pytest
 import jax.numpy as jnp
 import jax.random as jr
 import optax
-from adr import DeepSIC, minibatch_gradient_descent
+from adr import DeepSIC, minibatch_sgd
 
 @pytest.fixture
 def setup_model(request):
-    """
-    Shared fixture for model initialization with parameters.
-    """
+    """Shared fixture for model initialization."""
     params = request.param
     symbol_bits = params.get("symbol_bits", 1)
     num_users = params.get("num_users", 1)
@@ -26,24 +24,23 @@ def setup_model(request):
     )
     return model
 
-class TestMinibatchGradientDescent:
+
+class TestMinibatchSGD:
     @pytest.mark.parametrize("setup_model", [
         {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 1, "hidden_dim": 10},
         {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 4, "hidden_dim": 10}
     ], indirect=True)
     def test_single_user_synthetic_data(self, setup_model):
-        """
-        Test single user training process with synthetic data.
-        """
+        """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
-        num_samples = 1000
-        rx = jr.normal(key, (num_samples, 1))
+        data_size = 1000
+        rx = jr.normal(key, (data_size, 1))
         labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
             labels=labels, 
-            train_block_fn=minibatch_gradient_descent,
+            train_block_fn=minibatch_sgd,
             loss_fn=optax.sigmoid_binary_cross_entropy,
             num_epochs=5,
             batch_size=50,
@@ -61,18 +58,16 @@ class TestMinibatchGradientDescent:
         {"symbol_bits": 1, "num_users": 4, "num_antennas": 4, "num_layers": 4, "hidden_dim": 10}
     ], indirect=True)
     def test_multi_user_synthetic_data(self, setup_model):
-        """
-        Test milti-user training process with synthetic data.
-        """
+        """Test multi-user training process with synthetic data."""
         key = jr.PRNGKey(42)
-        num_samples = 1000
-        rx = jr.normal(key, (num_samples, setup_model.rx_size))
+        data_size = 1000
+        rx = jr.normal(key, (data_size, setup_model.rx_size))
         labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
             labels=labels, 
-            train_block_fn=minibatch_gradient_descent,
+            train_block_fn=minibatch_sgd,
             loss_fn=optax.sigmoid_binary_cross_entropy,
             num_epochs=20,
             batch_size=50,

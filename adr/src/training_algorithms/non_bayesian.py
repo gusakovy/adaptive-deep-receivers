@@ -7,9 +7,8 @@ from flax.training.train_state import TrainState
 import optax
 from optax import GradientTransformation
 
-
-def minibatch_gradient_descent(
-        flat_params: Array,
+def minibatch_sgd(
+        init_params: Array,
         unravel_fn: callable,
         apply_fn: callable,
         inputs: Array,
@@ -18,12 +17,13 @@ def minibatch_gradient_descent(
         num_epochs: int,
         batch_size: int = None,
         shuffle: bool = True,
-        optimizer: GradientTransformation = optax.adam(0.001)
+        optimizer: GradientTransformation = optax.adam(0.001),
+        **kwargs
     ) -> Array:
-    """Train a neural network using gradient descent.
+    """Train a neural network using minibatch stochastic gradient descent (SGD).
 
     Args:
-        flat_params (Array): Initial parameters.
+        init_param (Array): Initial parameters.
         unravel_fn (callable): Parameter unravel function.
         apply_fn (callable): Model apply function.
         inputs (Array): Model input(s).
@@ -35,7 +35,7 @@ def minibatch_gradient_descent(
         optimizer (GradientTransformation, optional): Optimizer. Defaults to optax.adam(0.001).
     """
 
-    params = unravel_fn(flat_params)
+    params = unravel_fn(init_params)
     state = TrainState.create(apply_fn=apply_fn, params=params, tx=optimizer)
 
     @jax.jit
@@ -65,5 +65,5 @@ def minibatch_gradient_descent(
         else:
             state = train_step(state, inputs, labels)
 
-    new_flat_params, _ = ravel_pytree(state.params)
-    return new_flat_params
+    new_params, _ = ravel_pytree(state.params)
+    return new_params
