@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import optax
 from flax import linen as nn
-from adr import CovarianceType, DeepSIC, minibatch_sgd, iterative_ekf, fg_bong, fg_bog, fg_bbb
+from adr import CovarianceType, DeepSIC, minibatch_sgd, iterative_ekf, fg_bong, dg_bong, fg_bog, dg_bog, fg_bbb, dg_bbb
 
 @pytest.fixture
 def setup_model(request):
@@ -209,6 +209,71 @@ class TestBONG:
 
         assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
 
+    @pytest.mark.parametrize("setup_model", [
+        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.DG},
+        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 4, "hidden_dim": 1, "covariance_type": CovarianceType.DG}
+    ], indirect=True)
+    def test_dg_bong_single_user_synthetic_data(self, setup_model):
+        """Test single-user training process with synthetic data."""
+        key = jr.PRNGKey(42)
+        data_size = 1000
+        rx = jr.normal(key, (data_size, 1))
+        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+
+        setup_model.fit(
+            rx=rx, 
+            labels=labels, 
+            train_block_fn=dg_bong,
+            key=jr.PRNGKey(21),
+            init_param_cov=0.1,
+            log_likelihood=lambda mean, cov, y: -optax.sigmoid_binary_cross_entropy(mean, y),
+            obs_function=nn.sigmoid,
+            obs_cov=0.1*jnp.eye(1),
+            dynamics_decay=1.0,
+            process_noise=0.0,
+            num_samples=10,
+            linplugin=True,
+            empirical_cov=False,
+        )
+
+        predictions = setup_model.soft_decode(rx)
+        predicted_labels = (predictions > 0.5).astype(jnp.float32)
+        accuracy = (predicted_labels == labels).mean()
+
+        assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
+
+    @pytest.mark.parametrize("setup_model", [
+        {"symbol_bits": 1, "num_users": 4, "num_antennas": 4, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.DG},
+        {"symbol_bits": 1, "num_users": 4, "num_antennas": 4, "num_layers": 4, "hidden_dim": 10, "covariance_type": CovarianceType.DG}
+    ], indirect=True)
+    def test_dg_bong_multi_user_synthetic_data(self, setup_model):
+        """Test multi-user training process with synthetic data."""
+        key = jr.PRNGKey(42)
+        data_size = 1000
+        rx = jr.normal(key, (data_size, setup_model.rx_size))
+        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+
+        setup_model.fit(
+            rx=rx, 
+            labels=labels, 
+            train_block_fn=dg_bong,
+            key=jr.PRNGKey(21),
+            init_param_cov=0.1,
+            log_likelihood=lambda mean, cov, y: -optax.sigmoid_binary_cross_entropy(mean, y),
+            obs_function=nn.sigmoid,
+            obs_cov=0.1*jnp.eye(1),
+            dynamics_decay=1.0,
+            process_noise=0.0,
+            num_samples=10,
+            linplugin=True,
+            empirical_cov=False,
+        )
+
+        predictions = setup_model.soft_decode(rx)
+        predicted_labels = (predictions > 0.5).astype(jnp.float32)
+        accuracy = (predicted_labels == labels).mean()
+
+        assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
 
 class TestBOG:
     @pytest.mark.parametrize("setup_model", [
@@ -244,6 +309,39 @@ class TestBOG:
 
         assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
 
+    @pytest.mark.parametrize("setup_model", [
+        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.DG}
+    ], indirect=True)
+    def test_dg_bog_single_user_synthetic_data(self, setup_model):
+        """Test single-user training process with synthetic data."""
+        key = jr.PRNGKey(42)
+        data_size = 1000
+        rx = jr.normal(key, (data_size, 1))
+        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+
+        setup_model.fit(
+            rx=rx, 
+            labels=labels, 
+            train_block_fn=dg_bog,
+            key=jr.PRNGKey(21),
+            init_param_cov=0.1,
+            log_likelihood=lambda mean, cov, y: -optax.sigmoid_binary_cross_entropy(mean, y),
+            obs_function=nn.sigmoid,
+            obs_cov=0.1*jnp.eye(1),
+            dynamics_decay=1.0,
+            process_noise=0.0,
+            num_samples=10,
+            linplugin=True,
+            empirical_fisher=False,
+            learning_rate=0.01,
+        )
+
+        predictions = setup_model.soft_decode(rx)
+        predicted_labels = (predictions > 0.5).astype(jnp.float32)
+        accuracy = (predicted_labels == labels).mean()
+
+        assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
+
 
 class TestBBB:
     @pytest.mark.parametrize("setup_model", [
@@ -260,6 +358,40 @@ class TestBBB:
             rx=rx, 
             labels=labels, 
             train_block_fn=fg_bbb,
+            key=jr.PRNGKey(21),
+            init_param_cov=0.1,
+            log_likelihood=lambda mean, cov, y: -optax.sigmoid_binary_cross_entropy(mean, y),
+            obs_function=nn.sigmoid,
+            obs_cov=0.1*jnp.eye(1),
+            dynamics_decay=1.0,
+            process_noise=0.0,
+            num_samples=10,
+            linplugin=True,
+            empirical_fisher=False,
+            learning_rate=0.001,
+            num_iter=10
+        )
+
+        predictions = setup_model.soft_decode(rx)
+        predicted_labels = (predictions > 0.5).astype(jnp.float32)
+        accuracy = (predicted_labels == labels).mean()
+
+        assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
+
+    @pytest.mark.parametrize("setup_model", [
+        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.DG}
+    ], indirect=True)
+    def test_dg_bbb_single_user_synthetic_data(self, setup_model):
+        """Test single-user training process with synthetic data."""
+        key = jr.PRNGKey(42)
+        data_size = 1000
+        rx = jr.normal(key, (data_size, 1))
+        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+
+        setup_model.fit(
+            rx=rx, 
+            labels=labels, 
+            train_block_fn=dg_bbb,
             key=jr.PRNGKey(21),
             init_param_cov=0.1,
             log_likelihood=lambda mean, cov, y: -optax.sigmoid_binary_cross_entropy(mean, y),
