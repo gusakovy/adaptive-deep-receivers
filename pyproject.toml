@@ -1,0 +1,29 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools", "setuptools-scm"]
+
+[tool.setuptools]
+packages = ["adr", "bong"]
+
+[project]
+authors = [
+  {name = "Yakov Gusakov", email = "yaakov0015@gmail.com"},
+]
+dependencies = [
+  "dynamax",
+  "flax",
+  "jax-tqdm",
+  "matplotlib",
+]
+description = "Adaptive Deep Receivers"
+dynamic = ["version"]
+name = "adr"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+  "pytest"
+]
+
+[project.urls]
+repository = "https://github.com/gusakovy/adaptive-deep-receivers"
