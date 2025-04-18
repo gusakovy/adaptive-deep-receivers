@@ -8,16 +8,16 @@ from jax.flatten_util import ravel_pytree
 from flax import linen as nn
 from adr.src.detectors.base import Detector
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
 
 class CovarianceType(Enum):
     NONE = None
     FULL = "full"
+    DG = "diagonal"
 
 
 class DeepSICBlock(nn.Module):
     """Single block of a DeepSIC model.
+    
     Args:
         symbol_bits (int): Number of bits per symbol.
         num_users (int): Number of users.
@@ -100,17 +100,18 @@ class DeepSIC(Detector):
         Args:
             init_cov (float | Array): Initial covariance scale or matrix or array of matrices of size num_layers x num_users.
         """
-        if isinstance(init_cov, float) or init_cov.shape == (self.param_size, self.param_size):
+        cov_shape = (self.param_size, self.param_size) if self.cov_type == CovarianceType.FULL else (self.param_size,)
+        if isinstance(init_cov, float) or init_cov.shape == cov_shape:
             if isinstance(init_cov, float):
-                init_cov = init_cov * jnp.eye(self.param_size)
-            self.params_cov = jnp.tile(0.1 * jnp.eye(self.param_size), (self.num_layers, self.num_users, 1, 1))
-            self.params_cov = self.params_cov.reshape(self.num_layers, self.num_users, self.param_size, self.param_size)
-        elif init_cov.shape == (self.num_layers, self.num_users, self.param_size, self.param_size):
+                init_cov = init_cov * jnp.eye(self.param_size) if self.cov_type == CovarianceType.FULL else init_cov * jnp.ones(self.param_size)
+            self.params_cov = jnp.tile(init_cov, (self.num_layers, self.num_users, 1, 1))
+            self.params_cov = self.params_cov.reshape(self.num_layers, self.num_users, *cov_shape)
+        elif init_cov.shape == (self.num_layers, self.num_users, *cov_shape):
             self.params_cov = init_cov
         else:
-            raise ValueError(f"Invalid shape for init_cov. Expected float, or array of shape (param_size, param_size) = ({self.param_size},{self.param_size})"
-                             f"or (num_layers, num_users, param_size, param_size) = ({self.num_layers},{self.num_users},{self.param_size},{self.param_size})."
-                             f"Got {init_cov.shape}.")
+            raise ValueError(f"Invalid shape for init_cov. Expected float, or array of shape {cov_shape}"
+                             f"or (num_layers, num_users, ...) = ({self.num_layers},{self.num_users},{cov_shape[0]},{cov_shape[1]}) "
+                             f"but got {init_cov.shape} instead.")
 
     def _pred_and_rx_to_input(self, layer_num: int, rx: Array, pred: Array = None) -> Array:
         """Prepare shared input(s) for all blocks in a layer.
@@ -192,7 +193,7 @@ class DeepSIC(Detector):
         rx = jnp.atleast_2d(rx)
         labels = labels.reshape((rx.shape[0], self.num_users, self.symbol_bits))
 
-        if self.cov_type == CovarianceType.FULL and self.params_cov is None:
+        if self.cov_type != CovarianceType.NONE and self.params_cov is None:
             self.init_params_cov(0.0)
 
         def update_user_block(user_params, inputs, labels):
@@ -210,7 +211,7 @@ class DeepSIC(Detector):
             inputs = self._pred_and_rx_to_input(layer_idx, rx, pred)
             new_layer_params = jax.vmap(update_user_block, in_axes=(0, None, 1))(layer_params,inputs,labels)
 
-            if self.cov_type == CovarianceType.FULL:
+            if self.cov_type != CovarianceType.NONE:
                 self.params = self.params.at[layer_idx].set(new_layer_params[0])
                 self.params_cov = self.params_cov.at[layer_idx].set(new_layer_params[1])
             else:
