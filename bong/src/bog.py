@@ -63,8 +63,8 @@ def predict_bog(
         Predicted belief state.
     """
     mean, cov = state
-    new_mean = jax.tree_map(lambda x: gamma * x, mean)
-    new_cov = jax.tree_map(lambda x, y: gamma**2 * x + y, cov, Q)
+    new_mean = jax.tree.map(lambda x: gamma * x, mean)
+    new_cov = jax.tree.map(lambda x, y: gamma**2 * x + y, cov, Q)
     new_state = AgentState(new_mean, new_cov)
     return new_state
 
@@ -88,7 +88,7 @@ def predict_bog_dlr(
     """
     mean, prec_diag, prec_lr = state
     P, L = prec_lr.shape
-    new_mean = jax.tree_map(lambda x: gamma * x, mean)
+    new_mean = jax.tree.map(lambda x: gamma * x, mean)
     new_prec_diag = 1 / (gamma**2 / prec_diag + q)
     C = jnp.linalg.pinv(
         jnp.eye(L) + q * prec_lr.T @ (prec_lr * (new_prec_diag / prec_diag))
@@ -777,7 +777,7 @@ class fg_bog:
 
         init_cov = init_cov * jnp.eye(len(init_mean))
         if isinstance(process_noise, (int, float)):
-            process_noise = jax.tree_map(lambda x: process_noise, init_cov)
+            process_noise = jax.tree.map(lambda x: process_noise, init_cov)
         if linplugin:
             _update_fn = staticmethod(update_lfg_bog)
         else:
@@ -978,7 +978,7 @@ class dg_bog:
 
         init_cov = init_cov * jnp.ones(len(init_mean))
         if isinstance(process_noise, (int, float)):
-            process_noise = jax.tree_map(lambda x: process_noise, init_cov)
+            process_noise = jax.tree.map(lambda x: process_noise, init_cov)
         if linplugin:
             _update_fn = staticmethod(update_ldg_bog)
         else:
@@ -1078,7 +1078,7 @@ class fg_reparam_bog:
 
         init_cov = init_cov * jnp.eye(len(init_mean))
         if isinstance(process_noise, (int, float)):
-            process_noise = jax.tree_map(lambda x: process_noise, init_cov)
+            process_noise = jax.tree.map(lambda x: process_noise, init_cov)
         if linplugin:
             _update_fn = staticmethod(update_lfg_reparam_bog)
         else:
@@ -1178,7 +1178,7 @@ class dg_reparam_bog:
 
         init_cov = init_cov * jnp.ones(len(init_mean))
         if isinstance(process_noise, (int, float)):
-            process_noise = jax.tree_map(lambda x: process_noise, init_cov)
+            process_noise = jax.tree.map(lambda x: process_noise, init_cov)
         if linplugin:
             _update_fn = staticmethod(update_ldg_reparam_bog)
         else:
