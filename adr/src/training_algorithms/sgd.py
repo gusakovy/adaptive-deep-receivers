@@ -67,3 +67,50 @@ def minibatch_sgd(
 
     new_params, _ = ravel_pytree(state.params)
     return new_params
+
+def streaming_gd(
+        init_params: Array,
+        unravel_fn: callable,
+        apply_fn: callable,
+        inputs: Array,
+        labels: Array,
+        loss_fn: callable,
+        learning_rate: float = 0.001,
+        **kwargs
+    ) -> Array:
+    """Train a neural network from using gradient descent on streaming data.
+
+    Args:
+        init_param (Array): Initial parameters.
+        unravel_fn (callable): Parameter unravel function.
+        apply_fn (callable): Model apply function.
+        inputs (Array): Model input(s).
+        labels (Array): Corresponding label(s).
+        loss_fn (callable): Loss function.
+        learning_rate (float, optional): Learning rate. Defaults to 0.001.
+    """
+
+    params = unravel_fn(init_params)
+    state = TrainState.create(apply_fn=apply_fn, params=params, tx=optax.adam(learning_rate))
+
+    @jax.jit
+    def train_step(state, input, label):
+        def loss_fn_of_params(params):
+            output = apply_fn(params, input)
+            loss = loss_fn(output, label)
+            return jnp.mean(loss)
+
+        grads = jax.grad(loss_fn_of_params)(state.params)
+        state = state.apply_gradients(grads=grads)
+        return state
+
+    def step_fn(state, data):
+        input, label = data
+        state = train_step(state, input, label)
+        return state, None
+
+    data_stream = jax.tree.map(lambda x: x[:, None], (inputs, labels))
+    state, _ = jax.lax.scan(step_fn, state, data_stream)
+
+    new_params, _ = ravel_pytree(state.params)
+    return new_params
