@@ -20,6 +20,7 @@ class UplinkMimoChannel(Channel):
         num_users (int): Number of single-antenna users.
         num_antennas (int): Number of receive antennas.
         apply_non_linearity (bool, optional): Whether to apply non-linearity to the received signal. Defaults to False.
+        keep_in_memory (bool, optional): Whether to keep the loaded channel matrices in memory. Defaults to False.
     """
 
     def __init__(
@@ -31,7 +32,8 @@ class UplinkMimoChannel(Channel):
             scaling_coefficient: float,
             num_users: int,
             num_antennas: int,
-            apply_non_linearity: bool = False
+            apply_non_linearity: bool = False,
+            keep_in_memory: bool = False
         ):
         if not os.path.exists(channel_dir):
             raise FileNotFoundError(f"Directory {channel_dir} does not exist.")
@@ -49,27 +51,40 @@ class UplinkMimoChannel(Channel):
         self.num_users = num_users
         self.num_antennas = num_antennas
         self.apply_non_linearity = apply_non_linearity
+        self.keep_in_memory = keep_in_memory
+        self.h = [None for _ in range(self.num_frames)] if self.keep_in_memory else None
+
+    def preload_channel_matrices(self, num_frames: int) -> Array:
+        if self.keep_in_memory:
+            for i in range(num_frames):
+                self._compute_channel_signal_convolution(i)
+        else:
+            raise ValueError("Preloading not allowed, set keep_in_memory=True to allow preloading them.")
 
     def _calculate_channel(self, frame_idx: int) -> Array:
         """Calculate the channel information matrix."""
-        h = jnp.zeros((self.num_users, self.num_antennas), dtype=jnp.complex64)
-        main_file_num = 1 + (frame_idx // self.frames_per_config)
-        for i in range(0, self.num_users):
-            path_to_mat = os.path.join(self.channel_dir, f'{self.file_prefix}_{main_file_num}.mat')
-            h_user = self.scaling_coefficient * jnp.array(
-                scipy.io.loadmat(path_to_mat)['magnitudes'][i, :self.num_antennas, frame_idx % self.frames_per_config],
-                dtype=jnp.complex64
-            )
-            h = h.at[i].set(h_user)
-
-        h = h.at[jnp.arange(self.num_users), jnp.arange(self.num_users)].set(1)
+        if not self.h or self.h[frame_idx] is None:
+            h = jnp.zeros((self.num_users, self.num_antennas), dtype=jnp.complex64)
+            main_file_num = 1 + (frame_idx // self.frames_per_config)
+            for i in range(0, self.num_users):
+                path_to_mat = os.path.join(self.channel_dir, f'{self.file_prefix}_{main_file_num}.mat')
+                h_user = self.scaling_coefficient * jnp.array(
+                    scipy.io.loadmat(path_to_mat)['H'][i, :self.num_antennas, frame_idx % self.frames_per_config],
+                    dtype=jnp.complex64
+                )
+                h_user = h_user / max(abs(h_user))
+                h = h.at[i].set(h_user)
+            if self.keep_in_memory:
+                self.h[frame_idx] = h
+        else:  # If the channel matrix is already calculated, use it
+            h = self.h[frame_idx]
         return h
 
     @staticmethod
     @jax.jit
     def _compute_channel_signal_convolution(h: Array, tx: Array) -> Array:
         """Compute the convolution of a channel matrix and an array of constellation points."""
-        conv = jnp.dot(h, tx.T)
+        conv = tx @ h
         return conv
 
     def transmit(self, key: Array, s: Array, snr: float, frame_idx: int = 0) -> Array:
@@ -86,11 +101,11 @@ class UplinkMimoChannel(Channel):
         conv = UplinkMimoChannel._compute_channel_signal_convolution(h, tx)
         var = 10 ** (-0.1 * snr)
         if self.modulation_type == "BPSK":
-            w = jnp.sqrt(var) * jr.normal(key, (self.num_antennas, tx.shape[0]))
+            w = jnp.sqrt(var) * jr.normal(key, (tx.shape[0], self.num_antennas))
         else:
             subkeys = jr.split(key, 2)
-            w_real = jnp.sqrt(var) / 2 * jr.normal(subkeys[0], (self.num_antennas, tx.shape[0]))
-            w_imag = jnp.sqrt(var) / 2 * jr.normal(subkeys[1], (self.num_antennas, tx.shape[0])) * 1j
+            w_real = jnp.sqrt(var) / 2 * jr.normal(subkeys[0], (tx.shape[0], self.num_antennas))
+            w_imag = jnp.sqrt(var) / 2 * jr.normal(subkeys[1], (tx.shape[0], self.num_antennas)) * 1j
             w = w_real + w_imag
         y = conv + w
         if self.apply_non_linearity:
