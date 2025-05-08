@@ -15,7 +15,7 @@ class UplinkMimoChannel(Channel):
         channel_dir (str): Path to the directory containing the channel matrices.
         file_prefix (str): Prefix of the channel matrix files, each corresponding to one configuration.
         frames_per_config (int): Number of time frames per configuration.
-        modulation_type (str): Modulation type.
+        modulation_type (str): Modulation type, e.g., "BPSK", "QPSK", "16-QAM".
         scaling_coefficient (float): Scaling coefficient for the channel matrix.
         num_users (int): Number of single-antenna users.
         num_antennas (int): Number of receive antennas.
@@ -97,7 +97,7 @@ class UplinkMimoChannel(Channel):
             frame_idx (int, optional): Time frame index. Defaults to 0.
         """
         h = self._calculate_channel(frame_idx)
-        tx = self.constellation_points[s].squeeze(-1)
+        tx = self.constellation_points[s].reshape(-1, self.num_users)
         conv = UplinkMimoChannel._compute_channel_signal_convolution(h, tx)
         var = 10 ** (-0.1 * snr)
         if self.modulation_type == "BPSK":

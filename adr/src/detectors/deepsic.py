@@ -1,4 +1,3 @@
-import os
 from enum import Enum
 import jax
 from jax import Array
@@ -70,7 +69,7 @@ class DeepSIC(Detector):
         self.num_users = num_users
         self.num_antennas = num_antennas
         self.num_layers = num_layers
-        self.rx_size = num_antennas if self.symbol_bits == 1 else 2 * self.num_antennas
+        self.rx_size = 2 * self.num_antennas
         self.block_input_size = self.rx_size + self.symbol_bits * self.num_users
         self.block_model= DeepSICBlock(
             symbol_bits=self.symbol_bits,
@@ -186,7 +185,7 @@ class DeepSIC(Detector):
 
         Args:
             rx (Array): Received signal(s).
-            labels (Array): True labels corresponding to the received signal(s).
+            labels (Array): Bitwise labels corresponding to the received signal(s).
             train_block_fn (callable): Function to train a single block.
             **kwargs: Additional arguments for the training function.
         """
