@@ -16,6 +16,7 @@ logger.info("Package initialized")
 from adr.src.detectors import CovarianceType,DeepSICBlock, DeepSIC
 from adr.src.training_algorithms import minibatch_sgd, streaming_gd, iterative_ekf, fg_bong, dg_bong, fg_bog, dg_bog, fg_bbb, dg_bbb
 from adr.src.channels import Channel, UplinkMimoChannel
+from adr.src.utils import bit_array_to_index, index_to_bit_array, complex_to_stacked_real, stacked_real_to_complex
 
 __all__ = [
     CovarianceType,
@@ -33,5 +34,10 @@ __all__ = [
     dg_bbb,
 
     Channel,
-    UplinkMimoChannel
+    UplinkMimoChannel,
+
+    bit_array_to_index,
+    index_to_bit_array,
+    complex_to_stacked_real,
+    stacked_real_to_complex,
 ]
