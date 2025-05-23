@@ -1,9 +1,9 @@
 from jax import Array
 import jax.numpy as jnp
-from bong.src import bog
+from bong.src import blr
 from bong.util import run_rebayes_algorithm
 
-def fg_bog(
+def fg_blr(
         init_param_mean: Array,
         unravel_fn: callable,
         apply_fn: callable,
@@ -20,9 +20,10 @@ def fg_bog(
         linplugin: bool = True,
         empirical_fisher: bool = False,
         learning_rate: float = 0.1,
+        num_iter: int = 10,
         **kwargs
     ) -> tuple[Array, Array]:
-    """Train a neural network using the full-covariance Gaussian Bayesian online gradient (BOG) algorithm.
+    """Train a neural network using the full-covariance Gaussian Bayesian learning rule (BLR) algorithm.
 
     Args:
         init_param_mean (Array): Initial parameters.
@@ -41,10 +42,12 @@ def fg_bog(
         linplugin (bool, optional): Whether to use the linearized plugin method. Defaults to True.
         empirical_fisher (bool, optional): Whether to use the empirical Fisher approximation to the Hessian matrix. Defaults to False.
         learning_rate (float, optional): Learning rate for the optimizer. Defaults to 0.1.
+        num_iter (int, optional): Number of iterations per step. Defaults to 10.
     """
+
     init_param_cov = init_param_cov if isinstance(init_param_cov, Array) else init_param_cov * jnp.eye(len(init_param_mean))
 
-    fg_bog = bog.fg_bog(
+    fg_blr = blr.fg_blr(
         init_mean=init_param_mean,
         init_cov=init_param_cov,
         log_likelihood=log_likelihood,
@@ -55,13 +58,14 @@ def fg_bog(
         num_samples=num_samples,
         linplugin=linplugin,
         empirical_fisher=empirical_fisher,
-        learning_rate=learning_rate
+        learning_rate=learning_rate,
+        num_iter=num_iter
     )
 
-    bog_result, _ = run_rebayes_algorithm(key, fg_bog, inputs, labels)
-    return bog_result.mean, bog_result.cov
+    blr_result, _ = run_rebayes_algorithm(key, fg_blr, inputs, labels)
+    return blr_result.mean, blr_result.cov
 
-def dg_bog(
+def dg_blr(
         init_param_mean: Array,
         unravel_fn: callable,
         apply_fn: callable,
@@ -78,9 +82,10 @@ def dg_bog(
         linplugin: bool = True,
         empirical_fisher: bool = False,
         learning_rate: float = 0.1,
+        num_iter: int = 10,
         **kwargs
     ) -> tuple[Array, Array]:
-    """Train a neural network using the diagonal-covariance Gaussian Bayesian online gradient (BOG) algorithm.
+    """Train a neural network using the diagonal-covariance Gaussian Bayesian learning rule (BLR) algorithm.
 
     Args:
         init_param_mean (Array): Initial parameters.
@@ -99,10 +104,12 @@ def dg_bog(
         linplugin (bool, optional): Whether to use the linearized plugin method. Defaults to True.
         empirical_fisher (bool, optional): Whether to use the empirical Fisher approximation to the Hessian matrix. Defaults to False.
         learning_rate (float, optional): Learning rate for the optimizer. Defaults to 0.1.
+        num_iter (int, optional): Number of iterations per step. Defaults to 10.
     """
+
     init_param_cov = init_param_cov if isinstance(init_param_cov, Array) else init_param_cov * jnp.ones(len(init_param_mean))
 
-    dg_bog = bog.dg_bog(
+    dg_blr = blr.dg_blr(
         init_mean=init_param_mean,
         init_cov=init_param_cov,
         log_likelihood=log_likelihood,
@@ -113,8 +120,9 @@ def dg_bog(
         num_samples=num_samples,
         linplugin=linplugin,
         empirical_fisher=empirical_fisher,
-        learning_rate=learning_rate
+        learning_rate=learning_rate,
+        num_iter=num_iter
     )
 
-    bog_result, _ = run_rebayes_algorithm(key, dg_bog, inputs, labels)
-    return bog_result.mean, bog_result.cov
+    blr_result, _ = run_rebayes_algorithm(key, dg_blr, inputs, labels)
+    return blr_result.mean, blr_result.cov

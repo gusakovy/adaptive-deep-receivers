@@ -58,7 +58,7 @@ def fg_bbb(
         linplugin=linplugin,
         empirical_fisher=empirical_fisher,
         learning_rate=learning_rate,
-        num_iter=num_iter,
+        num_iter=num_iter
     )
 
     bbb_result, _ = run_rebayes_algorithm(key, fg_bbb, inputs, labels)
@@ -119,7 +119,7 @@ def dg_bbb(
         linplugin=linplugin,
         empirical_fisher=empirical_fisher,
         learning_rate=learning_rate,
-        num_iter=num_iter,
+        num_iter=num_iter
     )
 
     bbb_result, _ = run_rebayes_algorithm(key, dg_bbb, inputs, labels)

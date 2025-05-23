@@ -39,7 +39,7 @@ def iterative_ekf(
         dynamics_function=param_dynamics_function,
         dynamics_covariance=param_dynamics_cov,
         emission_function=lambda w, x: obs_function(apply_fn(unravel_fn(w), x)),
-        emission_covariance=obs_cov,
+        emission_covariance=obs_cov
     )
 
     ekf_results = extended_kalman_filter(ekf_params, labels, inputs=inputs)

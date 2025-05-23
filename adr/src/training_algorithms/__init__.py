@@ -6,6 +6,7 @@ from adr.src.training_algorithms.sgd import minibatch_sgd, streaming_gd
 from adr.src.training_algorithms.ekf import iterative_ekf
 from adr.src.training_algorithms.bong import fg_bong, dg_bong
 from adr.src.training_algorithms.bog import fg_bog, dg_bog
+from adr.src.training_algorithms.blr import fg_blr, dg_blr
 from adr.src.training_algorithms.bbb import fg_bbb, dg_bbb
 
 __all__ = [
@@ -16,6 +17,8 @@ __all__ = [
     dg_bong,
     fg_bog,
     dg_bog,
+    fg_blr,
+    dg_blr,
     fg_bbb,
     dg_bbb
 ]
