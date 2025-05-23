@@ -1,5 +1,36 @@
+from collections import deque
 import jax.numpy as jnp
 from jax import Array
+
+
+class Metric:
+    def __init__(self, history=100):
+        self.history = history
+        self.reset()
+
+    def reset(self):
+        self.values = deque(maxlen=self.history)
+
+    def update(self, val):
+        self.values.append(val)
+
+    def get_stat(self, stat: str):
+        if len(self.values) == 0:
+            return 0
+        values_list = list(self.values)
+        if stat == "avg" or stat == "mean":
+            return sum(values_list) / len(values_list)
+        elif stat == "max":
+            return max(values_list)
+        elif stat == "min":
+            return min(values_list)
+        elif stat == "p50":
+            return sorted(values_list)[len(values_list) // 2]
+        elif stat == "p99":
+            index = int(len(values_list) * 0.99) - 1
+            return sorted(values_list)[max(0, index)]
+        else:
+            raise ValueError(f"Unsupported statistic: {stat}")
 
 def bit_array_to_index(bit_vector: Array) -> Array:
     """

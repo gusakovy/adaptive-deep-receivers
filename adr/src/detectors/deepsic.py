@@ -1,3 +1,4 @@
+import time
 from enum import Enum
 import jax
 from jax import Array
@@ -6,6 +7,7 @@ import jax.random as jr
 from jax.flatten_util import ravel_pytree
 from flax import linen as nn
 from adr.src.detectors.base import Detector
+from adr.src.utils import Metric
 
 
 class CovarianceType(Enum):
@@ -24,7 +26,6 @@ class DeepSICBlock(nn.Module):
         hidden_dim (int): Size of the hidden layer of the block.
         activation (callable, optional): Activation function. Defaults to ReLU.
     """
-
     symbol_bits: int
     num_users: int
     num_antennas: int
@@ -92,6 +93,8 @@ class DeepSIC(Detector):
         self.param_size = self.params.shape[-1]
         self.cov_type = cov_type
         self.params_cov = None
+        # Metrics
+        self.block_train_time = Metric(history=100)
 
     def init_params_cov(self, init_cov: float | Array):
         """Initialize the covariance matrices for the parameters of each DeepSICBlock.
@@ -222,7 +225,9 @@ class DeepSIC(Detector):
         # Loop over the layers and train each layer.
         predictions = None
         for layer_idx in range(self.num_layers):
+            start = time.perf_counter()
             predictions = train_layer(layer_idx, predictions)
+            self.block_train_time.update((time.perf_counter() - start) / (self.num_users * rx.shape[0]))
 
     def save(self, path: str):
         """Save the detector parameters to disk.
