@@ -37,8 +37,8 @@ class TestSGD:
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -47,7 +47,8 @@ class TestSGD:
             loss_fn=optax.sigmoid_binary_cross_entropy,
             num_epochs=5,
             batch_size=50,
-            shuffle=True
+            shuffle=True,
+            optimizer=optax.adam(0.01),
         )
 
         predictions = setup_model.soft_decode(rx)
@@ -65,7 +66,7 @@ class TestSGD:
         key = jr.PRNGKey(42)
         data_size = 1000
         rx = jr.normal(key, (data_size, setup_model.rx_size))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        labels = jnp.expand_dims(jnp.where(rx[:, :setup_model.num_antennas] + rx[:, setup_model.num_antennas:] > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -75,6 +76,7 @@ class TestSGD:
             num_epochs=20,
             batch_size=50,
             shuffle=True,
+            optimizer=optax.adam(0.01),
         )
 
         predictions = setup_model.soft_decode(rx)
@@ -93,8 +95,8 @@ class TestEKF:
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -114,7 +116,7 @@ class TestEKF:
         assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
 
     @pytest.mark.parametrize("setup_model", [
-        {"symbol_bits": 1, "num_users": 4, "num_antennas": 4, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.FULL},
+        {"symbol_bits": 1, "num_users": 4, "num_antennas": 4, "num_layers": 1, "hidden_dim": 12, "covariance_type": CovarianceType.FULL},
         {"symbol_bits": 1, "num_users": 4, "num_antennas": 4, "num_layers": 4, "hidden_dim": 10, "covariance_type": CovarianceType.FULL}
     ], indirect=True)
     def test_iterative_ekf_multi_user_synthetic_data(self, setup_model):
@@ -122,7 +124,7 @@ class TestEKF:
         key = jr.PRNGKey(42)
         data_size = 1000
         rx = jr.normal(key, (data_size, setup_model.rx_size))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        labels = jnp.expand_dims(jnp.where(rx[:, :setup_model.num_antennas] + rx[:, setup_model.num_antennas:] > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -145,14 +147,14 @@ class TestEKF:
 class TestBONG:
     @pytest.mark.parametrize("setup_model", [
         {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.FULL},
-        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 4, "hidden_dim": 1, "covariance_type": CovarianceType.FULL}
+        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 4, "hidden_dim": 10, "covariance_type": CovarianceType.FULL}
     ], indirect=True)
     def test_fg_bong_single_user_synthetic_data(self, setup_model):
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -185,7 +187,7 @@ class TestBONG:
         key = jr.PRNGKey(42)
         data_size = 1000
         rx = jr.normal(key, (data_size, setup_model.rx_size))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        labels = jnp.expand_dims(jnp.where(rx[:, :setup_model.num_antennas] + rx[:, setup_model.num_antennas:] > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -211,14 +213,14 @@ class TestBONG:
 
     @pytest.mark.parametrize("setup_model", [
         {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.DG},
-        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 4, "hidden_dim": 1, "covariance_type": CovarianceType.DG}
+        {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 4, "hidden_dim": 10, "covariance_type": CovarianceType.DG}
     ], indirect=True)
     def test_dg_bong_single_user_synthetic_data(self, setup_model):
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -251,7 +253,7 @@ class TestBONG:
         key = jr.PRNGKey(42)
         data_size = 1000
         rx = jr.normal(key, (data_size, setup_model.rx_size))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        labels = jnp.expand_dims(jnp.where(rx[:, :setup_model.num_antennas] + rx[:, setup_model.num_antennas:] > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -275,6 +277,7 @@ class TestBONG:
 
         assert accuracy > 0.95, f"Expected accuracy > 0.95, got {accuracy}"
 
+
 class TestBOG:
     @pytest.mark.parametrize("setup_model", [
         {"symbol_bits": 1, "num_users": 1, "num_antennas": 1, "num_layers": 1, "hidden_dim": 10, "covariance_type": CovarianceType.FULL}
@@ -283,8 +286,8 @@ class TestBOG:
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -300,7 +303,7 @@ class TestBOG:
             num_samples=10,
             linplugin=True,
             empirical_fisher=False,
-            learning_rate=0.01,
+            learning_rate=0.2,
         )
 
         predictions = setup_model.soft_decode(rx)
@@ -316,8 +319,8 @@ class TestBOG:
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -333,7 +336,7 @@ class TestBOG:
             num_samples=10,
             linplugin=True,
             empirical_fisher=False,
-            learning_rate=0.01,
+            learning_rate=0.2,
         )
 
         predictions = setup_model.soft_decode(rx)
@@ -351,8 +354,8 @@ class TestBBB:
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -368,7 +371,7 @@ class TestBBB:
             num_samples=10,
             linplugin=True,
             empirical_fisher=False,
-            learning_rate=0.001,
+            learning_rate=0.1,
             num_iter=10
         )
 
@@ -385,8 +388,8 @@ class TestBBB:
         """Test single-user training process with synthetic data."""
         key = jr.PRNGKey(42)
         data_size = 1000
-        rx = jr.normal(key, (data_size, 1))
-        labels = jnp.expand_dims(jnp.where(rx > 0, 1.0, 0.0), axis=-1)
+        rx = jr.normal(key, (data_size, 2))
+        labels = jnp.expand_dims(jnp.where(jnp.sum(rx, axis=-1, keepdims=True) > 0, 1.0, 0.0), axis=-1)
 
         setup_model.fit(
             rx=rx, 
@@ -402,7 +405,7 @@ class TestBBB:
             num_samples=10,
             linplugin=True,
             empirical_fisher=False,
-            learning_rate=0.001,
+            learning_rate=0.1,
             num_iter=10
         )
 
