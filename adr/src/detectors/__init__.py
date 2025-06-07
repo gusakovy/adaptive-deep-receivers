@@ -2,12 +2,11 @@
 Detectors.
 """
 
-from adr.src.detectors.deepsic import CovarianceType
 from adr.src.detectors.deepsic import DeepSICBlock, DeepSIC
+from adr.src.detectors.bayesian_deepsic import BayesianDeepSIC
 
 __all__ = [
-    CovarianceType,
-    
     DeepSICBlock,
-    DeepSIC
+    DeepSIC,
+    BayesianDeepSIC
 ]

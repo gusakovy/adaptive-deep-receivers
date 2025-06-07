@@ -1,46 +1,10 @@
-import time
-from enum import Enum
 import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 from jax.flatten_util import ravel_pytree
-from flax import linen as nn
 from adr.src.detectors.base import Detector
-from adr.src.utils import Metric
-
-
-class CovarianceType(Enum):
-    NONE = None
-    FULL = "full"
-    DG = "diagonal"
-
-
-class DeepSICBlock(nn.Module):
-    """Single block of a DeepSIC model.
-    
-    Args:
-        symbol_bits (int): Number of bits per symbol.
-        num_users (int): Number of users.
-        num_antennas (int): Number of receive antennas.
-        hidden_dim (int): Size of the hidden layer of the block.
-        activation (callable, optional): Activation function. Defaults to ReLU.
-    """
-    symbol_bits: int
-    num_users: int
-    num_antennas: int
-    hidden_dim: int
-    activation: callable = nn.relu
-
-    def setup(self):
-        self.features = [self.hidden_dim, self.symbol_bits]
-
-    @nn.compact
-    def __call__(self, x):
-        for feat in self.features[:-1]:
-            x = self.activation(nn.Dense(feat)(x))
-        return nn.Dense(self.features[-1])(x)
-
+from adr.src.detectors.deepsic_block import DeepSICBlock
 
 class DeepSIC(Detector):
     """DeepSIC model from https://ieeexplore.ieee.org/document/9242305 with bitwise outputs and 
@@ -53,7 +17,6 @@ class DeepSIC(Detector):
         num_antennas (int): Number of receive antennas.
         num_layers (int): Number of soft interference cancellation (SIC) layers.
         hidden_dim (int): Size of the hidden layer of each block.
-        cov_type (CovarianceType, optional): Type of covariance for the parameters. Defaults to CovarianceType.NONE.
     """
 
     def __init__(
@@ -64,56 +27,47 @@ class DeepSIC(Detector):
             num_antennas: int,
             num_layers: int,
             hidden_dim: int,
-            cov_type: CovarianceType = CovarianceType.NONE,
         ):
         self.symbol_bits = symbol_bits
         self.num_users = num_users
         self.num_antennas = num_antennas
         self.num_layers = num_layers
-        self.rx_size = 2 * self.num_antennas
-        self.block_input_size = self.rx_size + self.symbol_bits * self.num_users
-        self.block_model= DeepSICBlock(
+        self.hidden_dim = hidden_dim
+        self.rx_size = 2 * num_antennas
+        self.block_input_size = self.rx_size + symbol_bits * num_users
+
+        key = jr.PRNGKey(key) if isinstance(key, int) else key
+        param_key, self.fit_key = jr.split(key)
+        self._initialize_parameters(param_key)
+        self.train_state = None
+
+    def _initialize_parameters(self, key: Array):
+        """Initialize parameter means and covariances."""
+        # Initialize block model
+        block_model = DeepSICBlock(
             symbol_bits=self.symbol_bits,
             num_users=self.num_users,
             num_antennas=self.num_antennas,
-            hidden_dim=hidden_dim
+            hidden_dim=self.hidden_dim
         )
-        self.unravel_fn = None
-        key = jr.PRNGKey(key) if isinstance(key, int) else key
         subkeys = jr.split(key, self.num_users * self.num_layers)
+
+        # Get parameter structure and apply function
+        first_params = block_model.init(subkeys[0], jnp.empty((1, self.block_input_size)))
+        flat_params, unravel_fn = ravel_pytree(first_params)
+        self.apply_fn = lambda w, x: block_model.apply(unravel_fn(w), x)
+        self.param_size = len(flat_params)
+
+        # Initialize parameter means
         flat_params_list = []
         for layer_idx in range(self.num_layers):
             for user_idx in range(self.num_users):
                 subkey = subkeys[layer_idx * self.num_users + user_idx]
-                params = self.block_model.init(subkey, jnp.empty((1, self.block_input_size)))
-                flat_params, self.unravel_fn = ravel_pytree(params)
+                params = block_model.init(subkey, jnp.empty((1, self.block_input_size)))
+                flat_params, _ = ravel_pytree(params)
                 flat_params_list.append(flat_params)
 
         self.params = jnp.stack(flat_params_list).reshape((self.num_layers, self.num_users, -1))
-        self.param_size = self.params.shape[-1]
-        self.cov_type = cov_type
-        self.params_cov = None
-        # Metrics
-        self.block_train_time = Metric(history=100)
-
-    def init_params_cov(self, init_cov: float | Array):
-        """Initialize the covariance matrices for the parameters of each DeepSICBlock.
-
-        Args:
-            init_cov (float | Array): Initial covariance scale or matrix or array of matrices of size num_layers x num_users.
-        """
-        cov_shape = (self.param_size, self.param_size) if self.cov_type == CovarianceType.FULL else (self.param_size,)
-        if isinstance(init_cov, float) or init_cov.shape == cov_shape:
-            if isinstance(init_cov, float):
-                init_cov = init_cov * jnp.eye(self.param_size) if self.cov_type == CovarianceType.FULL else init_cov * jnp.ones(self.param_size)
-            self.params_cov = jnp.tile(init_cov, (self.num_layers, self.num_users, 1, 1))
-            self.params_cov = self.params_cov.reshape(self.num_layers, self.num_users, *cov_shape)
-        elif init_cov.shape == (self.num_layers, self.num_users, *cov_shape):
-            self.params_cov = init_cov
-        else:
-            raise ValueError(f"Invalid shape for init_cov. Expected float, or array of shape {cov_shape}"
-                             f"or (num_layers, num_users, ...) = ({self.num_layers},{self.num_users},{cov_shape[0]},{cov_shape[1]}) "
-                             f"but got {init_cov.shape} instead.")
 
     def _pred_and_rx_to_input(self, layer_num: int, rx: Array, pred: Array = None) -> Array:
         """Prepare shared input(s) for all blocks in a layer.
@@ -135,20 +89,6 @@ class DeepSIC(Detector):
 
         return jnp.concatenate([pred, rx], axis=-1)
 
-    def _block_soft_decode(self, params: Array, inputs: Array) -> Array:
-        """Soft-decode using a single block.
-
-        Args:
-            params (Array): Block parameters.
-            inputs (Array): Block input(s).
-
-        Returns:
-            Array: Soft decisions of the block.
-        """
-        unraveled_params = self.unravel_fn(params)
-        bitwise_logits = self.block_model.apply(unraveled_params, inputs)
-        return jax.nn.sigmoid(bitwise_logits)
-
     def layer_transition(self, layer_num: int, rx: Array, pred: Array = None) -> Array:
         """Pass data through a layer.
 
@@ -160,8 +100,12 @@ class DeepSIC(Detector):
         Returns:
             Array: Per symbol-bit soft decisions for all blocks in the layer.
         """
+        def block_soft_decode(params, inputs):
+            bitwise_logits = self.apply_fn(params, inputs)
+            return jax.nn.sigmoid(bitwise_logits)
+
         inputs = self._pred_and_rx_to_input(layer_num, rx, pred)
-        layer_outputs = jax.vmap(self._block_soft_decode, in_axes=(0, None))(self.params[layer_num], inputs)
+        layer_outputs = jax.vmap(block_soft_decode, in_axes=(0, None))(self.params[layer_num], inputs)
 
         return jax.lax.stop_gradient(layer_outputs)
 
@@ -182,65 +126,138 @@ class DeepSIC(Detector):
             predictions = self.layer_transition(layer_idx, rx, predictions)
         return predictions.transpose((1, 0, 2))
 
-    def fit(self, rx: Array, labels: Array, train_block_fn: callable, **kwargs) -> None:
+    def classic_fit(self, rx: Array, labels: Array, state_init_fn: callable, train_block_fn: callable, **kwargs) -> None:
         """Train each block independently using the provided train_block_fn method.
         Training is performed layer-by-layer, with parallel updates for user blocks within each layer.
 
         Args:
             rx (Array): Received signal(s).
             labels (Array): Bitwise labels corresponding to the received signal(s).
+            state_init_fn (callable): Function to initialize the state.
             train_block_fn (callable): Function to train a single block.
-            **kwargs: Additional arguments for the training function.
         """
-        rx = jnp.atleast_2d(rx)
-        labels = labels.reshape((rx.shape[0], self.num_users, self.symbol_bits))
+        fit_key, self.fit_key = jr.split(self.fit_key)
+        fit_keys = jr.split(fit_key, (self.num_layers, self.num_users))
 
-        if self.cov_type != CovarianceType.NONE and self.params_cov is None:
-            self.init_params_cov(0.0)
+        if self.train_state is None:
+            init_fn = lambda params: state_init_fn(self.apply_fn, params)
+            self.train_state = jax.vmap(jax.vmap(init_fn))(self.params)
 
-        def update_user_block(user_params, inputs, labels):
-            return train_block_fn(
-                user_params,
-                self.unravel_fn,
-                self.block_model.apply,
-                inputs,
-                labels,
-                **kwargs
-            )
+        def train_layer(carry, args):
+            """Update a single layer."""
+            pred, rx, labels = carry
+            layer_keys, layer_states = args
 
-        def train_layer(layer_idx, pred):
-            layer_params = self.params[layer_idx]
-            inputs = self._pred_and_rx_to_input(layer_idx, rx, pred)
-            new_layer_params = jax.vmap(update_user_block, in_axes=(0, None, 1))(layer_params,inputs,labels)
+            layer_inputs = jnp.concatenate([pred, rx], axis=-1)
 
-            if self.cov_type != CovarianceType.NONE:
-                self.params = self.params.at[layer_idx].set(new_layer_params[0])
-                self.params_cov = self.params_cov.at[layer_idx].set(new_layer_params[1])
-            else:
-                self.params = self.params.at[layer_idx].set(new_layer_params)
+            new_states, outputs = jax.vmap(
+                train_block_fn, 
+                in_axes=(0, 0, None, 1)
+            )(layer_keys, layer_states, layer_inputs, labels)
 
-            new_pred = self.layer_transition(layer_idx, rx, pred)
-            return new_pred
+            predictions = jax.nn.sigmoid(outputs)
+            predictions = predictions.transpose(1, 0, 2).reshape(rx.shape[0], -1)
+            new_carry = (predictions, rx, labels)
+            return new_carry, new_states
 
-        # Loop over the layers and train each layer.
-        predictions = None
-        for layer_idx in range(self.num_layers):
-            start = time.perf_counter()
-            predictions = train_layer(layer_idx, predictions)
-            self.block_train_time.update((time.perf_counter() - start) / (self.num_users * rx.shape[0]))
+        initial_pred = 0.5 * jnp.ones((rx.shape[0], self.num_users * self.symbol_bits))
+        _, self.train_state = jax.lax.scan(
+            train_layer, 
+            init=(initial_pred, rx, labels), 
+            xs=(fit_keys, self.train_state)
+        )
 
-    def save(self, path: str):
-        """Save the detector parameters to disk.
+        self.params = self.train_state.params
+
+    def fit(self, rx: Array, labels: Array, state_init_fn: callable, step_fn: callable, **kwargs) -> Array:
+        """Fit model on samples layer by layer. Each block is trained on all samples before moving on to the next layer.
 
         Args:
-            path (str): Save path for the detector parameters.
+            rx (Array): Received signal(s).
+            labels (Array): Bitwise labels corresponding to the received signal(s).
+            state_init_fn (callable): Function to initialize the state.
+            step_fn (callable): Training step function.
         """
+        if self.train_state is None:
+            init_fn = lambda params: state_init_fn(self.apply_fn, params)
+            self.train_state = jax.vmap(jax.vmap(init_fn))(self.params)
+
+        def scannable_step_fn(state, args):
+            inputs, labels = args
+            state, prediction = step_fn(state, inputs, labels)
+            return state, prediction
+
+        def update_layer(carry, state):
+            """Update a single layer."""
+            pred, rx, labels = carry
+
+            layer_inputs = jnp.concatenate([pred, rx], axis=-1)
+
+            def update_user_block(state, inputs, labels):
+                """Update a single user block."""
+                state, _ = jax.lax.scan(scannable_step_fn, init=state, xs=(inputs, labels))
+                predictions = jax.nn.sigmoid(self.apply_fn(state.params, inputs))
+                return state, predictions
+
+            new_state, predictions = jax.vmap(update_user_block, in_axes=(0, None, 1))(state, layer_inputs, labels)
+
+            predictions = predictions.transpose(1, 0, 2).reshape(rx.shape[0], -1)
+            new_carry = (predictions, rx, labels)
+            return new_carry, new_state
+
+        initial_pred = 0.5 * jnp.ones((rx.shape[0], self.num_users * self.symbol_bits))
+        _ , self.train_state = jax.lax.scan(update_layer, init=(initial_pred, rx, labels), xs=self.train_state)
+        self.params = self.train_state.params
+
+    def streaming_fit(self, rx: Array, labels: Array, state_init_fn: callable, step_fn: callable, save_history: bool = False, **kwargs) -> Array:
+        """Fit model on samples one by one, processing each sample through all layers.
+
+        Args:
+            rx (Array): Received signal(s).
+            labels (Array): Bitwise labels corresponding to the received signal(s).
+            state_init_fn (callable): Function to initialize the state.
+            step_fn (callable): Training step function.
+            save_history (bool, optional): Whether to save and return the state history. Defaults to False.
+
+        Returns:
+            Array: State history if save_history is True, otherwise None.
+        """
+        if self.train_state is None:
+            init_fn = lambda params: state_init_fn(self.apply_fn, params)
+            self.train_state = jax.vmap(jax.vmap(init_fn))(self.params)
+
+        def process_sample(state, args):
+            """Process a single sample through all layers."""
+            rx, labels = args
+
+            def process_sample_through_layer(carry, state):
+                """Process a single sample through a single layer."""
+                pred, rx, labels = carry
+
+                layer_input = jnp.concatenate([pred, rx], axis=-1)
+                state, layer_pred = jax.vmap(step_fn, in_axes=(0, None, 0))(
+                    state, layer_input, labels
+                )
+
+                new_carry = (layer_pred.flatten(), rx, labels)
+                return new_carry, state
+
+            _, new_state = jax.lax.scan(
+                process_sample_through_layer,
+                init=(0.5 * jnp.ones(self.num_users * self.symbol_bits), rx, labels),
+                xs=state
+            )
+            state_history = new_state if save_history else None
+            return new_state, state_history
+
+        self.train_state, state_history = jax.lax.scan(process_sample, init=self.train_state, xs=(rx, labels))
+        self.params = self.train_state.params
+        return state_history
+
+    def save(self, path: str):
+        """Save the model state to a file."""
         jnp.save(path, self.params)
 
     def load(self, path: str):
-        """Load the detector parameters from disk.
-
-        Args:
-            path (str): Path to detector parameters file.
-        """
+        """Load the model state from a file."""
         self.params = jnp.load(path)

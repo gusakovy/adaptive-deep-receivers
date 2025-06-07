@@ -13,31 +13,29 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.info("Package initialized")
 
-from adr.src.detectors import CovarianceType,DeepSICBlock, DeepSIC
-from adr.src.training_algorithms import minibatch_sgd, streaming_gd, iterative_ekf, fg_bong, dg_bong, fg_bog, dg_bog, fg_bbb, dg_bbb, fg_blr, dg_blr
+from adr.src.detectors.deepsic_block import DeepSICBlock
+from adr.src.detectors import DeepSIC, BayesianDeepSIC
+from adr.src.training_algorithms import build_sgd_train_fn, build_sgd_step_fn, iterative_ekf
+from adr.src.training_algorithms import step_fn_builder 
 from adr.src.channels import Channel, UplinkMimoChannel
-from adr.src.utils import Metric, bit_array_to_index, index_to_bit_array, complex_to_stacked_real, stacked_real_to_complex
+from adr.src.utils import CovarianceType, Metric, TrainingMethod
+from adr.src.utils import bit_array_to_index, index_to_bit_array, complex_to_stacked_real, stacked_real_to_complex
 
 __all__ = [
-    CovarianceType,
     DeepSICBlock,
     DeepSIC,
+    BayesianDeepSIC,
 
-    minibatch_sgd,
-    streaming_gd,
+    build_sgd_train_fn,
+    build_sgd_step_fn,
     iterative_ekf,
-    fg_bong,
-    dg_bong,
-    fg_bog,
-    dg_bog,
-    fg_blr,
-    dg_blr,
-    fg_bbb,
-    dg_bbb,
+    step_fn_builder,
 
     Channel,
     UplinkMimoChannel,
 
+    CovarianceType,
+    TrainingMethod,
     Metric,
     bit_array_to_index,
     index_to_bit_array,

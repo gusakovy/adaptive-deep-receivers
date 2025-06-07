@@ -2,23 +2,13 @@
 Trainers.
 """
 
-from adr.src.training_algorithms.sgd import minibatch_sgd, streaming_gd
+from adr.src.training_algorithms.sgd import build_sgd_train_fn, build_sgd_step_fn
 from adr.src.training_algorithms.ekf import iterative_ekf
-from adr.src.training_algorithms.bong import fg_bong, dg_bong
-from adr.src.training_algorithms.bog import fg_bog, dg_bog
-from adr.src.training_algorithms.blr import fg_blr, dg_blr
-from adr.src.training_algorithms.bbb import fg_bbb, dg_bbb
+from adr.src.training_algorithms.step_functions import step_fn_builder
 
 __all__ = [
-    minibatch_sgd,
-    streaming_gd,
+    build_sgd_train_fn,
+    build_sgd_step_fn,
     iterative_ekf,
-    fg_bong,
-    dg_bong,
-    fg_bog,
-    dg_bog,
-    fg_blr,
-    dg_blr,
-    fg_bbb,
-    dg_bbb
+    step_fn_builder,
 ]

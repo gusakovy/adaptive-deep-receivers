@@ -1,7 +1,20 @@
+from enum import Enum
 from collections import deque
 import jax.numpy as jnp
 from jax import Array
 
+
+class CovarianceType(Enum):
+    FULL = "full"
+    DG = "diagonal"
+
+class TrainingMethod(Enum):
+    """Enumeration of core training methods from BONG library."""
+    BBB = "bbb"    # Bayes by Backprop
+    BLR = "blr"    # Bayesian Learning Rule
+    BOG = "bog"    # Bayesian Online Gradient
+    BONG = "bong"  # Bayesian Online Natural Gradient
+    SGD = "sgd"    # Stochastic Gradient Descent
 
 class Metric:
     def __init__(self, history=100):

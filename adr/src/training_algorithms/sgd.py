@@ -1,116 +1,95 @@
 import jax
-from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
-from jax.flatten_util import ravel_pytree
 from flax.training.train_state import TrainState
 import optax
 from optax import GradientTransformation
 
-def minibatch_sgd(
-        init_params: Array,
-        unravel_fn: callable,
-        apply_fn: callable,
-        inputs: Array,
-        labels: Array,
-        loss_fn: callable,
-        num_epochs: int,
+def build_sgd_train_fn(
+        dynamics_decay: float = 0.999,
+        loss_fn: callable = None,
+        num_epochs: int = 10,
         batch_size: int = None,
         shuffle: bool = True,
-        optimizer: GradientTransformation = optax.adam(0.001),
-        **kwargs
-    ) -> Array:
-    """Train a neural network using minibatch stochastic gradient descent (SGD).
-
-    Args:
-        init_param (Array): Initial parameters.
-        unravel_fn (callable): Parameter unravel function.
-        apply_fn (callable): Model apply function.
-        inputs (Array): Model input(s).
-        labels (Array): Corresponding label(s).
-        loss_fn (callable): Loss function.
-        num_epochs (int): Number of training epochs.
-        batch_size (int, optional): Batch size for training. Defaults to None.
-        shuffle (bool, optional): Shuffle data before training (only if batch_size is not None). Defaults to True.
-        optimizer (GradientTransformation, optional): Optimizer. Defaults to optax.adam(0.001).
-    """
-
-    params = unravel_fn(init_params)
-    state = TrainState.create(apply_fn=apply_fn, params=params, tx=optimizer)
-
-    @jax.jit
-    def train_step(state, inputs, labels):
-        def loss_fn_of_params(params):
-            outputs = apply_fn(params, inputs)
-            loss = loss_fn(outputs, labels)
-            return jnp.mean(loss)
-
-        grads = jax.grad(loss_fn_of_params)(state.params)
-        state = state.apply_gradients(grads=grads)
-        return state
-
-    for epoch in range(num_epochs):
-        if batch_size:
-            if shuffle:
-                perm = jr.permutation(jr.PRNGKey(epoch), inputs.shape[0])
-                inputs = inputs[perm]
-                labels = labels[perm]
-
-            num_samples = inputs.shape[0]
-            for start_idx in range(0, num_samples, batch_size):
-                end_idx = min(start_idx + batch_size, num_samples)
-                batch_inputs = inputs[start_idx:end_idx]
-                batch_labels = labels[start_idx:end_idx]
-                state = train_step(state, batch_inputs, batch_labels)
-        else:
-            state = train_step(state, inputs, labels)
-
-    new_params, _ = ravel_pytree(state.params)
-    return new_params
-
-def streaming_gd(
-        init_params: Array,
-        unravel_fn: callable,
-        apply_fn: callable,
-        inputs: Array,
-        labels: Array,
-        loss_fn: callable,
+        optimizer: GradientTransformation = optax.adam,
         learning_rate: float = 0.001,
         **kwargs
-    ) -> Array:
-    """Train a neural network from using gradient descent on streaming data.
+    ) -> callable:
+    """Build a training function for stochastic gradient descent (SGD)."""
 
-    Args:
-        init_param (Array): Initial parameters.
-        unravel_fn (callable): Parameter unravel function.
-        apply_fn (callable): Model apply function.
-        inputs (Array): Model input(s).
-        labels (Array): Corresponding label(s).
-        loss_fn (callable): Loss function.
-        learning_rate (float, optional): Learning rate. Defaults to 0.001.
-    """
-
-    params = unravel_fn(init_params)
-    state = TrainState.create(apply_fn=apply_fn, params=params, tx=optax.adam(learning_rate))
+    def init_state(apply_fn, params):
+        return TrainState.create(apply_fn=apply_fn, params=params, tx=optimizer(learning_rate))
 
     @jax.jit
-    def train_step(state, input, label):
+    def train_fn(key, state, inputs, labels):
+        keys = jr.split(key, num_epochs)
+
+        def train_step(state, args):
+            inputs, labels = args
+
+            def loss_fn_of_params(params):
+                outputs = state.apply_fn(params, inputs)
+                loss = loss_fn(outputs, labels)
+                return jnp.mean(loss)
+
+            grads = jax.grad(loss_fn_of_params)(state.params)
+            state = state.apply_gradients(grads=grads)
+            return state, None
+
+        for epoch in range(num_epochs):
+            if batch_size:
+                if shuffle:
+                    perm = jr.permutation(keys[epoch], inputs.shape[0])
+                    inputs = inputs[perm]
+                    labels = labels[perm]
+
+                state = state.replace(params=dynamics_decay*state.params)
+                batched_inputs = jnp.reshape(inputs, (inputs.shape[0]//batch_size, batch_size, -1))
+                batched_labels = jnp.reshape(labels, (labels.shape[0]//batch_size, batch_size, -1))
+                state, _ = jax.lax.scan(train_step, state, (batched_inputs, batched_labels))
+            else:
+                state = state.replace(params=dynamics_decay*state.params)
+                state, _ = train_step(state, (inputs, labels))
+
+        outputs = state.apply_fn(state.params, inputs)
+        return state, outputs
+
+    return init_state, train_fn
+
+def build_sgd_step_fn(
+        dynamics_decay: float = 0.999,
+        num_iter: int = 10,
+        loss_fn: callable = None,
+        optimizer: GradientTransformation = optax.adam,
+        learning_rate: float = 0.001,
+        **kwargs
+    ) -> callable:
+    """Build a step function for stochastic gradient descent (SGD)."""
+
+    def init_state(apply_fn, params):
+        return TrainState.create(apply_fn=apply_fn, params=params, tx=optimizer(learning_rate))
+    
+    def update_fn(carry, _):
+        state, input, target = carry
+
         def loss_fn_of_params(params):
-            output = apply_fn(params, input)
-            loss = loss_fn(output, label)
+            output = state.apply_fn(params, input)
+            loss = loss_fn(output, target)
             return jnp.mean(loss)
 
         grads = jax.grad(loss_fn_of_params)(state.params)
         state = state.apply_gradients(grads=grads)
-        return state
+        return (state, input, target), None
 
-    def step_fn(state, data):
-        input, label = data
-        state = train_step(state, input, label)
-        return state, None
+    @jax.jit
+    def step_fn(state, input, target):
 
-    data_stream = jax.tree.map(lambda x: x[:, None], (inputs, labels))
-    state, _ = jax.lax.scan(step_fn, state, data_stream)
+        state = state.replace(params=dynamics_decay*state.params)
+        (state, _, _), _ = jax.lax.scan(update_fn, (state, input, target), jnp.arange(num_iter))
+        
+        prediction = state.apply_fn(state.params, input)
+        prediction = jax.nn.sigmoid(prediction)
 
-    new_params, _ = ravel_pytree(state.params)
-    return new_params
+        return state, prediction
+
+    return init_state, step_fn
