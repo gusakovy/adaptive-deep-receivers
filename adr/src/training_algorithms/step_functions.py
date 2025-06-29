@@ -52,7 +52,7 @@ def step_fn_builder(
         state, predicted_state, input, target = carry
         new_state = update_fn(
             rng_key=key,
-            state_pred=state,
+            state_pred=predicted_state,
             state=state,
             x=input,
             y=target,
@@ -72,7 +72,7 @@ def step_fn_builder(
         """Single training step for the specified method and configuration."""
         state = AgentState(params_mean, params_cov)
         predicted_state = predict_fn(state, dynamics_decay, process_noise)
-        if method == TrainingMethod.BONG:
+        if method in [TrainingMethod.BONG, TrainingMethod.BOG]:
             state = predicted_state
         keys = jax.random.split(rng_key, num_iter)
         (updated_state, _, _, _), _ = jax.lax.scan(_update_fn, (state, predicted_state, input, target), keys)
