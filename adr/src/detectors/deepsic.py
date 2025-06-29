@@ -1,3 +1,4 @@
+import pickle
 import jax
 from jax import Array
 import jax.numpy as jnp
@@ -256,8 +257,15 @@ class DeepSIC(Detector):
 
     def save(self, path: str):
         """Save the model state to a file."""
-        jnp.save(path, self.params)
+        state = {
+            'params': self.params,
+        }
+        with open(path, 'wb') as f:
+            pickle.dump(state, f)
 
     def load(self, path: str):
         """Load the model state from a file."""
-        self.params = jnp.load(path)
+        with open(path, 'rb') as f:
+            state = pickle.load(f)
+        self.params = state['params']
+        self.train_state = None
