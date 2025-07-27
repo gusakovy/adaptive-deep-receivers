@@ -70,62 +70,40 @@ class DeepSIC(Detector):
 
         self.params = jnp.stack(flat_params_list).reshape((self.num_layers, self.num_users, -1))
 
-    def _pred_and_rx_to_input(self, layer_num: int, rx: Array, pred: Array = None) -> Array:
-        """Prepare shared input(s) for all blocks in a layer.
-
-        Args:
-            layer_num (int): Layer number.
-            rx (Array): Received signal(s).
-            pred (Array, optional): Soft decisions of the previous layer. Defaults to None for the first layer.
-
-        Returns:
-            Array: Shared input(s) for all blocks in a layer.
-        """
-        if layer_num == 0:
-            initial_pred = jnp.full((1, self.symbol_bits * self.num_users), 0.5)
-            pred = jnp.tile(initial_pred, (rx.shape[0], 1))
-
-        else:
-            pred = pred.transpose((1, 0, 2)).reshape((pred.shape[1], -1))
-
-        return jnp.concatenate([pred, rx], axis=-1)
-
-    def layer_transition(self, layer_num: int, rx: Array, pred: Array = None) -> Array:
-        """Pass data through a layer.
-
-        Args:
-            layer_num (int): Layer number.
-            rx (Array): Received signal(s).
-            pred (Array, optional): Soft decisions from the previous layer. Defaults to None.
-
-        Returns:
-            Array: Per symbol-bit soft decisions for all blocks in the layer.
-        """
-        def block_soft_decode(params, inputs):
-            bitwise_logits = self.apply_fn(params, inputs)
-            return jax.nn.sigmoid(bitwise_logits)
-
-        inputs = self._pred_and_rx_to_input(layer_num, rx, pred)
-        layer_outputs = jax.vmap(block_soft_decode, in_axes=(0, None))(self.params[layer_num], inputs)
-
-        return jax.lax.stop_gradient(layer_outputs)
-
-    def soft_decode(self, rx: Array, first_layers: int = None) -> Array:
+    def soft_decode(self, rx: Array) -> Array:
         """Soft-decode a (batch of) received signal(s).
 
         Args:
             rx (Array): Received signal(s).
-            first_layers (int, optional): Number of layers to use for decoding. Defaults to None to use all of them.
 
         Returns:
             Array: Per user and per symbol-bit soft decisions.
         """
-        rx = jnp.atleast_2d(rx)
-        predictions = None
-        num_layers = self.num_layers if first_layers is None else min(first_layers, self.num_layers)
-        for layer_idx in range(num_layers):
-            predictions = self.layer_transition(layer_idx, rx, predictions)
-        return predictions.transpose((1, 0, 2))
+        def process_sample(rx_sample):
+            """Process a single sample through all layers."""
+
+            def process_sample_through_layer(carry, layer_params):
+                """Process a single sample through a single layer."""
+                pred, rx_sample = carry
+
+                layer_input = jnp.concatenate([pred, rx_sample], axis=-1)
+                layer_pred = jax.vmap(self.apply_fn, in_axes=(0, None))(
+                    layer_params, layer_input
+                )
+                layer_pred = jax.nn.sigmoid(layer_pred)
+
+                new_carry = (layer_pred.flatten(), rx_sample)
+                return new_carry, layer_pred
+
+            _, predictions = jax.lax.scan(
+                process_sample_through_layer,
+                init=(0.5 * jnp.ones(self.num_users * self.symbol_bits), rx_sample),
+                xs=self.params
+            )
+            return predictions[-1]
+
+        predictions = jax.vmap(process_sample)(rx)
+        return predictions
 
     def classic_fit(self, rx: Array, labels: Array, state_init_fn: callable, train_block_fn: callable, **kwargs) -> None:
         """Train each block independently using the provided train_block_fn method.

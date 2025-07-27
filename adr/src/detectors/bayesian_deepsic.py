@@ -81,7 +81,7 @@ class BayesianDeepSIC:
         self.params_cov = self.params_cov.reshape(self.num_layers, self.num_users, *cov_shape)
 
     def soft_decode(self, rx: Array) -> Array:
-        """Soft-decode (a batch of) received signal(s).
+        """Soft-decode a (batch of) received signal(s).
 
         Args:
             rx (Array): Received signal(s).
