@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from tqdm import tqdm
 import optax
-from adr import DeepSIC, BayesianDeepSIC
+from adr import DeepSIC, BayesianDeepSIC, ResNetDetector, BayesianResNetDetector
 from adr import CovarianceType, TrainingMethod, UplinkMimoChannel
 from adr import step_fn_builder, build_sgd_step_fn
 from adr.src.channels.modulations import MODULATIONS
@@ -41,7 +41,7 @@ def validate_config(config: dict[str, any]) -> None:
         if param not in config['algorithm']:
             raise ValueError(f"Missing required algorithm parameter: {param}")
 
-    model_required = ['num_users', 'num_antennas', 'num_layers', 'hidden_dim']
+    model_required = ['type', 'num_users', 'num_antennas', 'num_layers', 'hidden_dim']
     for param in model_required:
         if param not in config['model']:
             raise ValueError(f"Missing required model parameter: {param}")
@@ -97,6 +97,11 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
         # We only support diagonal covariance for these methods due to computational complexity
         print(f"Warning: {method} only supports diagonal covariance, setting covariance_type to diag")
         cleaned_config['algorithm']['covariance_type'] = 'diag'
+    
+    if not(cleaned_config['algorithm'].get('linplugin', True) or cleaned_config['algorithm'].get('empirical_fisher', True)):
+        # We don't allow MC-based methods gradients without empirical fisher due to computational complexity
+        print(f"Warning: Running without linplugin requires empirical fisher, setting empirical_fisher to true")
+        cleaned_config['algorithm']['empirical_fisher'] = True
 
     # Remove all unused parameters
     for param in unused_params:
@@ -110,13 +115,15 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
 
     return cleaned_config
 
-def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianDeepSIC]:
+def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianDeepSIC, ResNetDetector, BayesianResNetDetector]:
     """Create a DeepSIC model based on configuration."""
     model_config = config['model']
     algo_config = config['algorithm']
+    model_type = model_config['type'].lower()
 
     if algo_config['method'] == 'sgd':
-        model = DeepSIC(
+        model_class = DeepSIC if model_type == 'deepsic' else ResNetDetector
+        model = model_class(
             key=key,
             symbol_bits=int(math.log2(len(MODULATIONS[config['channel']['modulation']]))),
             num_users=model_config['num_users'],
@@ -126,7 +133,8 @@ def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianD
         )
     else:
         cov_type = COV_TYPE_MAP[algo_config['covariance_type'].lower()]
-        model = BayesianDeepSIC(
+        model_class = BayesianDeepSIC if model_type == 'deepsic' else BayesianResNetDetector
+        model = model_class(
             key=key,
             symbol_bits=int(math.log2(len(MODULATIONS[config['channel']['modulation']]))),
             num_users=model_config['num_users'],
@@ -154,8 +162,9 @@ def create_channel(config: dict[str, any]) -> UplinkMimoChannel:
 
 def create_step_function(config: dict[str, any], model: BayesianDeepSIC) -> callable:
     """Create a step function based on algorithm configuration."""
+    model_config = config['model']
     algo_config = config['algorithm']
-
+    model_type = model_config['type'].lower()
     method = METHOD_MAP[algo_config['method'].lower()]
 
     if method == TrainingMethod.SGD:
@@ -169,7 +178,7 @@ def create_step_function(config: dict[str, any], model: BayesianDeepSIC) -> call
         return init_state, step_fn
     else:
         cov_type = COV_TYPE_MAP[algo_config['covariance_type'].lower()]
-        obs_cov = algo_config['obs_cov_scale'] * jnp.eye(model.symbol_bits)
+        obs_cov = algo_config['obs_cov_scale'] * jnp.eye(model.symbol_bits if model_type == 'deepsic' else model.output_size)
         process_noise =  jnp.eye(model.params_mean.shape[-1]) if model.cov_type == CovarianceType.FULL else jnp.ones(model.params_mean.shape[-1])
         process_noise = algo_config['process_noise'] * process_noise
 

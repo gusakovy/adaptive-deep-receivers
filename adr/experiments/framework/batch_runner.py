@@ -95,6 +95,7 @@ def run_batch_experiments(
         'total_experiments': len(configs),
         'completed_experiments': 0,
         'failed_experiments': 0,
+        'failure_messages': [],
         'experiment_hashes': [],
         'experiment_results': {},
         'config_path': config_path,
@@ -124,6 +125,7 @@ def run_batch_experiments(
 
         except Exception as e:
             batch_results['failed_experiments'] += 1
+            batch_results['failure_messages'].append(f"Error running experiment {config_hash}: {e}\n")
             continue
 
     batch_results_clean = deepcopy(batch_results)
@@ -136,6 +138,8 @@ def run_batch_experiments(
         print(f"Total experiments: {batch_results['total_experiments']}")
         print(f"Completed: {batch_results['completed_experiments']}")
         print(f"Failed: {batch_results['failed_experiments']}")
+        if batch_results['failed_experiments'] > 0:
+            print(f"Failure messages: {batch_results['failure_messages']}")
 
     return batch_results
 
