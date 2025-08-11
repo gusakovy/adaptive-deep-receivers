@@ -3,5 +3,8 @@
         "adr"
     ],
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "terminal.integrated.commandsToSkipShell": [
+        "-workbench.action.quickOpen"
+    ]
 }
