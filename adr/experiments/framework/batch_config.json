@@ -1,0 +1,36 @@
+{
+  "model": {
+    "num_users": 3,
+    "num_antennas": 5,
+    "num_layers": 4,
+    "hidden_dim": 24,
+    "init_param_cov": 0.1
+  },
+  "channel": {
+    "modulation": "QPSK",
+    "snr": 6,
+    "linear_channel": true,
+    "channel_path": "adr/experiments/data/QuaDRiGa_3GPP_Indoor_LOS/eval/channel_coefficients.mat"
+  },
+  "experiment": {
+    "sync_frames": 4,
+    "track_frames": 96,
+    "symbols_per_frame": 64,
+    "pilot_per_frame": 4,
+    "test_dim": 100000,
+    "seed": 42
+  },
+  "algorithm": {
+    "method": ["bog", "bbb", "blr", "bong"],
+    "covariance_type": "diag",
+    "linplugin": true,
+    "reparameterized": [true, false],
+    "dynamics_decay": 0.999,
+    "obs_cov_scale": [0.1, 0.01],
+    "process_noise": 0.001,
+    "num_samples": 1,
+    "empirical_fisher": [true, false],
+    "learning_rate": [0.1, 0.01],
+    "num_iter": [1, 10]
+  }
+}
