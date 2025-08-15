@@ -2,9 +2,8 @@ import jax.numpy as jnp
 
 MODULATIONS = {
     "BPSK": jnp.array([-1, 1], dtype=jnp.float32),
-    "QPSK": jnp.array([[jnp.cos(jnp.pi * (k + 1 / 2) / 2) +
-                        jnp.sin(jnp.pi * (k + 1 / 2) / 2) * 1j] for k in range(4)], dtype=jnp.complex64),
-    "16-QAM": jnp.array([complex(x, y) for x in [-3, -1, 1, 3] for y in [-3, -1, 1, 3]], dtype=jnp.complex64) / jnp.sqrt(2)
+    "QPSK": jnp.array([complex(x, y) for y in [1, -1] for x in [1, -1]], dtype=jnp.complex64) / jnp.sqrt(2),
+    "16-QAM": jnp.array([complex(x, y) for x in [3, 1, -3, -1] for y in [3, 1, -3, -1]], dtype=jnp.complex64) / jnp.sqrt(10)
 }
 
 if __name__ == "__main__":
