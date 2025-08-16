@@ -126,6 +126,7 @@ def run_batch_experiments(
         except Exception as e:
             batch_results['failed_experiments'] += 1
             batch_results['failure_messages'].append(f"Error running experiment {config_hash}: {e}\n")
+            # raise e # For debugging
             continue
 
     batch_results_clean = deepcopy(batch_results)

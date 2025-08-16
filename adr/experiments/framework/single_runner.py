@@ -41,12 +41,12 @@ def validate_config(config: dict[str, any]) -> None:
         if param not in config['algorithm']:
             raise ValueError(f"Missing required algorithm parameter: {param}")
 
-    model_required = ['type', 'num_users', 'num_antennas', 'num_layers', 'hidden_dim']
+    model_required = ['type', 'num_layers', 'hidden_dim']
     for param in model_required:
         if param not in config['model']:
             raise ValueError(f"Missing required model parameter: {param}")
 
-    channel_required = ['modulation', 'snr']
+    channel_required = ['modulation', 'snr', 'num_users', 'num_antennas']
     for param in channel_required:
         if param not in config['channel']:
             raise ValueError(f"Missing required channel parameter: {param}")
@@ -118,6 +118,7 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
 def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianDeepSIC, ResNetDetector, BayesianResNetDetector]:
     """Create a DeepSIC model based on configuration."""
     model_config = config['model']
+    channel_config = config['channel']
     algo_config = config['algorithm']
     model_type = model_config['type'].lower()
 
@@ -126,8 +127,8 @@ def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianD
         model = model_class(
             key=key,
             symbol_bits=int(math.log2(len(MODULATIONS[config['channel']['modulation']]))),
-            num_users=model_config['num_users'],
-            num_antennas=model_config['num_antennas'],
+            num_users=channel_config['num_users'],
+            num_antennas=channel_config['num_antennas'],
             num_layers=model_config['num_layers'],
             hidden_dim=model_config['hidden_dim']
         )
@@ -137,8 +138,8 @@ def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianD
         model = model_class(
             key=key,
             symbol_bits=int(math.log2(len(MODULATIONS[config['channel']['modulation']]))),
-            num_users=model_config['num_users'],
-            num_antennas=model_config['num_antennas'],
+            num_users=channel_config['num_users'],
+            num_antennas=channel_config['num_antennas'],
             num_layers=model_config['num_layers'],
             hidden_dim=model_config['hidden_dim'],
             cov_type=cov_type,
@@ -149,13 +150,12 @@ def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianD
 def create_channel(config: dict[str, any]) -> UplinkMimoChannel:
     """Create a channel based on configuration."""
     channel_config = config['channel']
-    model_config = config['model']
 
     channel = UplinkMimoChannel(
         path=channel_config['channel_path'],
         modulation_type=channel_config['modulation'],
-        num_users=model_config['num_users'],
-        num_antennas=model_config['num_antennas'],
+        num_users=channel_config['num_users'],
+        num_antennas=channel_config['num_antennas'],
         apply_non_linearity=not channel_config['linear_channel']
     )
     return channel

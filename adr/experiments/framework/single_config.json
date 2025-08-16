@@ -1,8 +1,6 @@
 {
   "model": {
     "type": "deepsic",
-    "num_users": 3,
-    "num_antennas": 5,
     "num_layers": 4,
     "hidden_dim": 24,
     "init_param_cov": 0.1
@@ -10,6 +8,8 @@
   "channel": {
     "modulation": "QPSK",
     "snr": 6,
+    "num_users": 3,
+    "num_antennas": 5,
     "linear_channel": true,
     "channel_path": "adr/experiments/data/QuaDRiGa_3GPP_Indoor_LOS/eval/channel_coefficients.mat"
   },
