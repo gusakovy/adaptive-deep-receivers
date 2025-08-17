@@ -16,7 +16,7 @@ logger.info("Package initialized")
 from adr.src.detectors.deepsic_block import DeepSICBlock
 from adr.src.detectors import DeepSIC, BayesianDeepSIC
 from adr.src.detectors import ResNetDetector, BayesianResNetDetector
-from adr.src.training_algorithms import build_sgd_train_fn, build_sgd_step_fn
+from adr.src.training_algorithms import build_sgd_train_fn, build_gd_step_fn, build_stateful_gd_step_fn
 from adr.src.training_algorithms import step_fn_builder 
 from adr.src.channels import Channel, UplinkMimoChannel
 from adr.src.utils import CovarianceType, Metric, TrainingMethod
@@ -30,7 +30,8 @@ __all__ = [
     BayesianResNetDetector,
 
     build_sgd_train_fn,
-    build_sgd_step_fn,
+    build_gd_step_fn,
+    build_stateful_gd_step_fn,
     step_fn_builder,
 
     Channel,

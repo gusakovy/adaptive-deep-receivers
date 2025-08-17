@@ -9,12 +9,13 @@ class CovarianceType(Enum):
     DG = "diagonal"
 
 class TrainingMethod(Enum):
-    """Enumeration of core training methods from BONG library."""
+    """Enumeration of training methods."""
+    GD = "gd"      # (Streaming) Gradient Descent
+    SGD = "sgd"    # (Batch) Stochastic Gradient Descent
     BBB = "bbb"    # Bayes by Backprop
     BLR = "blr"    # Bayesian Learning Rule
     BOG = "bog"    # Bayesian Online Gradient
     BONG = "bong"  # Bayesian Online Natural Gradient
-    SGD = "sgd"    # Stochastic Gradient Descent
 
 class Metric:
     def __init__(self, history=100):

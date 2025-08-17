@@ -11,7 +11,7 @@ from tqdm import tqdm
 import optax
 from adr import DeepSIC, BayesianDeepSIC, ResNetDetector, BayesianResNetDetector
 from adr import CovarianceType, TrainingMethod, UplinkMimoChannel
-from adr import step_fn_builder, build_sgd_step_fn
+from adr import step_fn_builder, build_gd_step_fn, build_sgd_train_fn
 from adr.src.channels.modulations import MODULATIONS
 from adr.experiments.utils import load_config, generate_config_hash, prepare_experiment_data
 
@@ -22,6 +22,7 @@ COV_TYPE_MAP = {
 }
 
 METHOD_MAP = {
+    'gd': TrainingMethod.GD,
     'sgd': TrainingMethod.SGD,
     'bbb': TrainingMethod.BBB,
     'blr': TrainingMethod.BLR,
@@ -55,7 +56,7 @@ def validate_config(config: dict[str, any]) -> None:
     for param in exp_required:
         if param not in config['experiment']:
             raise ValueError(f"Missing required experiment parameter: {param}")
-        
+
 def clean_config(config: dict[str, any]) -> dict[str, any]:
     """Remove unused parameters based on the method type."""
     method = config['algorithm']['method'].lower()
@@ -63,24 +64,29 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
 
     # Method-specific parameter requirements
     method_params = {
-        'sgd': {
+        'gd': {
             'required': {'learning_rate', 'num_iter'},
+            'unused': {'covariance_type', 'linplugin', 'reparameterized', 'obs_cov_scale', 'process_noise', 'num_samples', 'empirical_fisher', 'batch_size'}
+        },
+        'sgd': {
+            'required': {'learning_rate', 'num_iter', 'batch_size'},
             'unused': {'covariance_type', 'linplugin', 'reparameterized', 'obs_cov_scale', 'process_noise', 'num_samples', 'empirical_fisher'}
         },
         'bbb': {
             'required': {'covariance_type', 'learning_rate', 'num_iter'},
+            'unused': {'batch_size'}
         },
         'blr': {
-            'required': {'covariance_type', 'num_iter'},
-            'unused': {'learning_rate'}
+            'required': {'covariance_type', 'learning_rate', 'num_iter'},
+            'unused': {'batch_size'}
         },
         'bog': {
             'required': {'covariance_type', 'learning_rate', 'num_iter'},
-            'unused': {}
-        },        
+            'unused': {'batch_size'}
+        },
         'bong': {
             'required': {'covariance_type'},
-            'unused': {'learning_rate', 'num_iter'}
+            'unused': {'learning_rate', 'num_iter', 'batch_size'}
         },
     }
     method_spec = method_params.get(method, {})
@@ -97,7 +103,7 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
         # We only support diagonal covariance for these methods due to computational complexity
         print(f"Warning: {method} only supports diagonal covariance, setting covariance_type to diag")
         cleaned_config['algorithm']['covariance_type'] = 'diag'
-    
+
     if not(cleaned_config['algorithm'].get('linplugin', True) or cleaned_config['algorithm'].get('empirical_fisher', True)):
         # We don't allow MC-based methods gradients without empirical fisher due to computational complexity
         print(f"Warning: Running without linplugin requires empirical fisher, setting empirical_fisher to true")
@@ -122,11 +128,11 @@ def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianD
     algo_config = config['algorithm']
     model_type = model_config['type'].lower()
 
-    if algo_config['method'] == 'sgd':
+    if algo_config['method'] in ['gd', 'sgd']:
         model_class = DeepSIC if model_type == 'deepsic' else ResNetDetector
         model = model_class(
             key=key,
-            symbol_bits=int(math.log2(len(MODULATIONS[config['channel']['modulation']]))),
+            symbol_bits=int(math.log2(len(MODULATIONS[channel_config['modulation']]))),
             num_users=channel_config['num_users'],
             num_antennas=channel_config['num_antennas'],
             num_layers=model_config['num_layers'],
@@ -137,7 +143,7 @@ def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianD
         model_class = BayesianDeepSIC if model_type == 'deepsic' else BayesianResNetDetector
         model = model_class(
             key=key,
-            symbol_bits=int(math.log2(len(MODULATIONS[config['channel']['modulation']]))),
+            symbol_bits=int(math.log2(len(MODULATIONS[channel_config['modulation']]))),
             num_users=channel_config['num_users'],
             num_antennas=channel_config['num_antennas'],
             num_layers=model_config['num_layers'],
@@ -160,22 +166,35 @@ def create_channel(config: dict[str, any]) -> UplinkMimoChannel:
     )
     return channel
 
-def create_step_function(config: dict[str, any], model: BayesianDeepSIC) -> callable:
-    """Create a step function based on algorithm configuration."""
+def create_online_learning_function(config: dict[str, any], model: BayesianDeepSIC) -> callable:
+    """Create an online learning function based on algorithm configuration."""
     model_config = config['model']
     algo_config = config['algorithm']
     model_type = model_config['type'].lower()
     method = METHOD_MAP[algo_config['method'].lower()]
 
-    if method == TrainingMethod.SGD:
-        init_state, step_fn = build_sgd_step_fn(
+    if method == TrainingMethod.GD:
+        init_state, step_fn = build_gd_step_fn(
+            apply_fn=model.apply_fn,
+            loss_fn=optax.sigmoid_binary_cross_entropy,
             dynamics_decay=algo_config['dynamics_decay'],
             num_iter=algo_config['num_iter'],
-            loss_fn=optax.sigmoid_binary_cross_entropy,
-            optimizer=optax.sgd,
             learning_rate=algo_config['learning_rate'],
         )
         return init_state, step_fn
+
+    elif method == TrainingMethod.SGD:
+        init_state, train_fn = build_sgd_train_fn(
+            loss_fn=optax.sigmoid_binary_cross_entropy,
+            dynamics_decay=algo_config['dynamics_decay'],
+            num_epochs=algo_config['num_iter'],
+            batch_size=algo_config['batch_size'],
+            shuffle=True,
+            optimizer=optax.adam,
+            learning_rate=algo_config['learning_rate']
+        )
+        return init_state, train_fn
+
     else:
         cov_type = COV_TYPE_MAP[algo_config['covariance_type'].lower()]
         obs_cov = algo_config['obs_cov_scale'] * jnp.eye(model.symbol_bits if model_type == 'deepsic' else model.output_size)
@@ -216,7 +235,7 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], BayesianDeep
     # Initialize channel, model, and step function
     channel = create_channel(config)
     model = create_model(config, model_key)
-    state_init_fn, step_fn = create_step_function(config, model)
+    state_init_fn, online_learning_fn = create_online_learning_function(config, model)
 
     # Prepare data
     sync_frames = config['experiment']['sync_frames']
@@ -252,24 +271,40 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], BayesianDeep
     ber_array = []
     # Sync phase
     for train_rx, train_labels in tqdm(sync_dataloader, total=sync_frames, leave=False, desc='Sync frames'):
-        model.streaming_fit(
-            rx=train_rx,
-            labels=train_labels,
-            step_fn=step_fn,
-            state_init_fn=state_init_fn,
-        )
+        if config['algorithm']['method'] == 'sgd':
+            model.classic_fit(
+                rx=train_rx,
+                labels=train_labels,
+                train_block_fn=online_learning_fn,
+                state_init_fn=state_init_fn,
+            )
+        else:
+            model.streaming_fit(
+                rx=train_rx,
+                labels=train_labels,
+                step_fn=online_learning_fn,
+                state_init_fn=state_init_fn,
+            )
         test_rx, test_labels = next(test_dataloader_iterator)
         ber = test_model(model, test_rx, test_labels)
         ber_array.append(ber)
 
     # Track phase
     for train_rx, train_labels in tqdm(track_dataloader, total=track_frames, leave=False, desc='Track frames'):
-        model.streaming_fit(
-            rx=train_rx,
-            labels=train_labels,
-            step_fn=step_fn,
-            state_init_fn=state_init_fn,
-        )
+        if config['algorithm']['method'] == 'sgd':
+            model.classic_fit(
+                rx=train_rx,
+                labels=train_labels,
+                train_block_fn=online_learning_fn,
+                state_init_fn=state_init_fn,
+            )
+        else:
+            model.streaming_fit(
+                rx=train_rx,
+                labels=train_labels,
+                step_fn=online_learning_fn,
+                state_init_fn=state_init_fn,
+            )
         test_rx, test_labels = next(test_dataloader_iterator)
         ber = test_model(model, test_rx, test_labels)
         ber_array.append(ber)
@@ -321,7 +356,7 @@ def save_results(results: dict[str, any], model: BayesianDeepSIC, config: dict[s
 def load_experiment_by_hash(config_hash: str, base_results_dir: str = 'adr/experiments/results') -> dict[str, any]:
     """Load experiment results and config by hash."""
     experiment_dir = os.path.join(base_results_dir, config_hash)
-    
+
     if not os.path.exists(experiment_dir):
         raise FileNotFoundError(f"No experiment found with hash: {config_hash}")
 
@@ -341,7 +376,7 @@ def load_experiment_by_hash(config_hash: str, base_results_dir: str = 'adr/exper
     if os.path.exists(model_path):
         with open(model_path, 'rb') as f:
             model_state = pickle.load(f)
-    
+
     return {
         'results': results,
         'config': config,
