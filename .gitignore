@@ -174,5 +174,7 @@ cython_debug/
 .pypirc
 
 # Experiments
+*.pdf
+*.png
 adr/experiments/plots/
 adr/experiments/results/
