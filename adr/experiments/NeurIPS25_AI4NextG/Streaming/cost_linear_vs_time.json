@@ -7,31 +7,19 @@
   },
   "channel": {
     "modulation": "QPSK",
-    "snr": 6,
+    "snr": 10,
     "num_users": 3,
     "num_antennas": 5,
     "linear_channel": true,
     "channel_path": "adr/experiments/data/COST2100_CloselySpacedUser/eval/channel_coefficients.mat"
   },
   "experiment": {
-    "sync_frames": 4,
-    "track_frames": 96,
+    "sync_frames": 2,
+    "track_frames": 298,
     "symbols_per_frame": 64,
-    "pilot_per_frame": 4,
+    "pilot_per_frame": 2,
     "test_dim": 100000,
-    "seed": 42
+    "seed": [0, 1, 2, 3, 4]
   },
-  "algorithm": {
-    "method": "bog",
-    "covariance_type": "diag",
-    "linplugin": true,
-    "reparameterized": true,
-    "dynamics_decay": 0.999,
-    "obs_cov_scale": 0.1,
-    "process_noise": 0.001,
-    "num_samples": 1,
-    "empirical_fisher": false,
-    "learning_rate": 0.1,
-    "num_iter": 1
-  }
+  "algorithm": {}
 }

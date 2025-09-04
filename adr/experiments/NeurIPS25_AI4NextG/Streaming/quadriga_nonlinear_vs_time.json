@@ -1,0 +1,25 @@
+{
+  "model": {
+    "type": "deepsic",
+    "num_layers": 4,
+    "hidden_dim": 24,
+    "init_param_cov": 0.1
+  },
+  "channel": {
+    "modulation": "QPSK",
+    "snr": 12,
+    "num_users": 3,
+    "num_antennas": 5,
+    "linear_channel": false,
+    "channel_path": "adr/experiments/data/QuaDRiGa_3GPP_LOS/eval/channel_coefficients.mat"
+  },
+  "experiment": {
+    "sync_frames": 4,
+    "track_frames": 96,
+    "symbols_per_frame": 64,
+    "pilot_per_frame": 16,
+    "test_dim": 100000,
+    "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  },
+  "algorithm": {}
+}

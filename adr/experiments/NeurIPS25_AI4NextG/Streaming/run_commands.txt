@@ -1,0 +1,47 @@
+# COST2100 Linear Channel
+
+    ## Average Tracking BER
+    .venv/bin/python adr/experiments/framework/scenario_plotter.py \
+        --y_param "avg_track_ber" \
+        --base_config "adr/experiments/NeurIPS25_AI4NextG/Streaming/cost_linear_vs_snr.json" \
+        --compared_configs_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming/methods" \
+        --save_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming" \
+        --no_title \
+        --xlabel "SNR [dB]" \
+        --ylabel "Average Tracking BER" \
+        --save_name "cost_lin_ber_vs_snr.pdf"
+
+    ## Time series (in the config set SNR to single value instead of an array)
+    .venv/bin/python adr/experiments/framework/scenario_plotter.py \
+        --time_series --y_param "ber" \
+        --base_config "adr/experiments/NeurIPS25_AI4NextG/Streaming/cost_linear_vs_time.json" \
+        --compared_configs_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming/methods" \
+        --save_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming" \
+        --no_title \
+        --xlabel "Channel Snapshot" \
+        --ylabel "BER" \
+        --save_name "cost_lin_ber_vs_time_10db.pdf"
+
+# QuaDRiGa Non-linear Channel
+
+    ## Average Tracking BER
+    .venv/bin/python adr/experiments/framework/scenario_plotter.py \
+        --y_param "avg_track_ber" \
+        --base_config "adr/experiments/NeurIPS25_AI4NextG/Streaming/quadriga_nonlinear_vs_snr.json" \
+        --compared_configs_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming/methods" \
+        --save_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming" \
+        --no_title \
+        --xlabel "SNR [dB]" \
+        --ylabel "Average Tracking BER" \
+        --save_name "quadriga_nonlin_ber_vs_snr.pdf"
+
+    ## Time series (in the config set SNR to single value instead of an array)
+    .venv/bin/python adr/experiments/framework/scenario_plotter.py \
+        --time_series --y_param "ber" \
+        --base_config "adr/experiments/NeurIPS25_AI4NextG/Streaming/quadriga_nonlinear_vs_time.json" \
+        --compared_configs_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming/methods" \
+        --save_dir "adr/experiments/NeurIPS25_AI4NextG/Streaming" \
+        --no_title \
+        --xlabel "Channel Snapshot" \
+        --ylabel "BER" \
+        --save_name "quadriga_nonlin_ber_vs_time_12db.pdf"
