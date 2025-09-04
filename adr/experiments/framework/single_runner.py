@@ -60,6 +60,7 @@ def validate_config(config: dict[str, any]) -> None:
 def clean_config(config: dict[str, any]) -> dict[str, any]:
     """Remove unused parameters based on the method type."""
     method = config['algorithm']['method'].lower()
+    model_type = config['model']['type'].lower()
     cleaned_config = deepcopy(config)
 
     # Method-specific parameter requirements
@@ -102,6 +103,11 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
     if method in ['bbb', 'bog', 'blr'] and cleaned_config['algorithm']['covariance_type'] == 'full':
         # We only support diagonal covariance for these methods due to computational complexity
         print(f"Warning: {method} only supports diagonal covariance, setting covariance_type to diag")
+        cleaned_config['algorithm']['covariance_type'] = 'diag'
+    
+    if model_type == 'resnet' and cleaned_config['algorithm'].get('covariance_type', None) == 'full':
+        # Full covariance methods will run out of memory for ResNet model
+        print(f"Warning: Full covariance methods will run out of memory for ResNet model, setting covariance_type to diag")
         cleaned_config['algorithm']['covariance_type'] = 'diag'
 
     if not(cleaned_config['algorithm'].get('linplugin', True) or cleaned_config['algorithm'].get('empirical_fisher', True)):
