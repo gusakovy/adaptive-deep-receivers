@@ -4,8 +4,35 @@ from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 from jax.flatten_util import ravel_pytree
+from flax import linen as nn
 from adr.src.detectors.base import Detector
-from adr.src.detectors.deepsic_block import DeepSICBlock
+
+
+class DeepSICBlock(nn.Module):
+    """Single block of a DeepSIC model.
+    
+    Args:
+        symbol_bits (int): Number of bits per symbol.
+        num_users (int): Number of users.
+        num_antennas (int): Number of receive antennas.
+        hidden_dim (int): Size of the hidden layer of the block.
+        activation (callable, optional): Activation function. Defaults to ReLU.
+    """
+    symbol_bits: int
+    num_users: int
+    num_antennas: int
+    hidden_dim: int
+    activation: callable = nn.relu
+
+    def setup(self):
+        self.features = [self.hidden_dim, self.symbol_bits]
+
+    @nn.compact
+    def __call__(self, x):
+        for feat in self.features[:-1]:
+            x = self.activation(nn.Dense(feat)(x))
+        return nn.Dense(self.features[-1])(x)
+
 
 class DeepSIC(Detector):
     """DeepSIC model from https://ieeexplore.ieee.org/document/9242305 with bitwise outputs and 
@@ -105,7 +132,7 @@ class DeepSIC(Detector):
         predictions = jax.vmap(process_sample)(rx)
         return predictions
 
-    def classic_fit(self, rx: Array, labels: Array, state_init_fn: callable, train_block_fn: callable, **kwargs) -> None:
+    def classic_fit(self, rx: Array, labels: Array, state_init_fn: callable, extract_params: callable, train_block_fn: callable, **kwargs) -> None:
         """Train each block independently using the provided train_block_fn method.
         Training is performed layer-by-layer, with parallel updates for user blocks within each layer.
 
@@ -113,6 +140,7 @@ class DeepSIC(Detector):
             rx (Array): Received signal(s).
             labels (Array): Bitwise labels corresponding to the received signal(s).
             state_init_fn (callable): Function to initialize the state.
+            extract_params (callable): Function to extract the parameters from the state.
             train_block_fn (callable): Function to train a single block.
         """
         fit_key, self.fit_key = jr.split(self.fit_key)
@@ -146,76 +174,86 @@ class DeepSIC(Detector):
             xs=(fit_keys, self.train_state)
         )
 
-        self.params = self.train_state.params
+        self.params = extract_params(self.train_state)
 
-    def fit(self, rx: Array, labels: Array, state_init_fn: callable, step_fn: callable, **kwargs) -> Array:
+    def fit(self, rx: Array, labels: Array, state_init_fn: callable, extract_params: callable, step_fn: callable, **kwargs) -> Array:
         """Fit model on samples layer by layer. Each block is trained on all samples before moving on to the next layer.
 
         Args:
             rx (Array): Received signal(s).
             labels (Array): Bitwise labels corresponding to the received signal(s).
             state_init_fn (callable): Function to initialize the state.
+            extract_params (callable): Function to extract the parameters from the state.
             step_fn (callable): Training step function.
         """
+        fit_key, self.fit_key = jr.split(self.fit_key)
+        fit_keys = jr.split(fit_key, (self.num_layers, self.num_users, rx.shape[0]))
+    
         if self.train_state is None:
             init_fn = lambda params: state_init_fn(self.apply_fn, params)
             self.train_state = jax.vmap(jax.vmap(init_fn))(self.params)
 
         def scannable_step_fn(state, args):
-            inputs, labels = args
-            state, prediction = step_fn(state, inputs, labels)
+            key, inputs, labels = args
+            state, prediction = step_fn(key, state, inputs, labels)
             return state, prediction
 
-        def update_layer(carry, state):
+        def update_layer(carry, args):
             """Update a single layer."""
             pred, rx, labels = carry
+            layer_keys, layer_states = args
 
             layer_inputs = jnp.concatenate([pred, rx], axis=-1)
 
-            def update_user_block(state, inputs, labels):
+            def update_user_block(key, state, inputs, labels):
                 """Update a single user block."""
                 state, _ = jax.lax.scan(scannable_step_fn, init=state, xs=(inputs, labels))
-                predictions = jax.nn.sigmoid(self.apply_fn(state.params, inputs))
+                predictions = jax.nn.sigmoid(self.apply_fn(extract_params(state), inputs))
                 return state, predictions
 
-            new_state, predictions = jax.vmap(update_user_block, in_axes=(0, None, 1))(state, layer_inputs, labels)
+            new_state, predictions = jax.vmap(update_user_block, in_axes=(0, 0, None, 1))(layer_keys, layer_states, layer_inputs, labels)
 
             predictions = predictions.transpose(1, 0, 2).reshape(rx.shape[0], -1)
             new_carry = (predictions, rx, labels)
             return new_carry, new_state
 
         initial_pred = 0.5 * jnp.ones((rx.shape[0], self.num_users * self.symbol_bits))
-        _ , self.train_state = jax.lax.scan(update_layer, init=(initial_pred, rx, labels), xs=self.train_state)
-        self.params = self.train_state.params
+        _ , self.train_state = jax.lax.scan(update_layer, init=(initial_pred, rx, labels), xs=(fit_keys, self.train_state))
+        self.params = extract_params(self.train_state)
 
-    def streaming_fit(self, rx: Array, labels: Array, state_init_fn: callable, step_fn: callable, save_history: bool = False, **kwargs) -> Array:
+    def streaming_fit(self, rx: Array, labels: Array, state_init_fn: callable, extract_params: callable, step_fn: callable, save_history: bool = False, **kwargs) -> Array:
         """Fit model on samples one by one, processing each sample through all layers.
 
         Args:
             rx (Array): Received signal(s).
             labels (Array): Bitwise labels corresponding to the received signal(s).
             state_init_fn (callable): Function to initialize the state.
+            extract_params (callable): Function to extract the parameters from the state.
             step_fn (callable): Training step function.
             save_history (bool, optional): Whether to save and return the state history. Defaults to False.
 
         Returns:
             Array: State history if save_history is True, otherwise None.
         """
+        fit_key, self.fit_key = jr.split(self.fit_key)
+        fit_keys = jr.split(fit_key, (rx.shape[0], self.num_layers, self.num_users))
+
         if self.train_state is None:
             init_fn = lambda params: state_init_fn(self.apply_fn, params)
             self.train_state = jax.vmap(jax.vmap(init_fn))(self.params)
 
         def process_sample(state, args):
             """Process a single sample through all layers."""
-            rx, labels = args
+            keys, rx, labels = args
 
-            def process_sample_through_layer(carry, state):
+            def process_sample_through_layer(carry, args):
                 """Process a single sample through a single layer."""
                 pred, rx, labels = carry
+                layer_keys, state = args
 
                 layer_input = jnp.concatenate([pred, rx], axis=-1)
-                state, layer_pred = jax.vmap(step_fn, in_axes=(0, None, 0))(
-                    state, layer_input, labels
+                state, layer_pred = jax.vmap(step_fn, in_axes=(0, 0, None, 0))(
+                    layer_keys, state, layer_input, labels
                 )
 
                 new_carry = (layer_pred.flatten(), rx, labels)
@@ -224,13 +262,13 @@ class DeepSIC(Detector):
             _, new_state = jax.lax.scan(
                 process_sample_through_layer,
                 init=(0.5 * jnp.ones(self.num_users * self.symbol_bits), rx, labels),
-                xs=state
+                xs=(keys, state)
             )
             state_history = new_state if save_history else None
             return new_state, state_history
 
-        self.train_state, state_history = jax.lax.scan(process_sample, init=self.train_state, xs=(rx, labels))
-        self.params = self.train_state.params
+        self.train_state, state_history = jax.lax.scan(process_sample, init=self.train_state, xs=(fit_keys, rx, labels))
+        self.params = extract_params(self.train_state)
         return state_history
 
     def save(self, path: str):

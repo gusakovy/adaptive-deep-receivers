@@ -13,21 +13,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.info("Package initialized")
 
-from adr.src.detectors.deepsic_block import DeepSICBlock
-from adr.src.detectors import DeepSIC, BayesianDeepSIC
-from adr.src.detectors import ResNetDetector, BayesianResNetDetector
+from adr.src.detectors import Detector, DeepSIC, ResNetDetector
 from adr.src.training_algorithms import build_sgd_train_fn, build_gd_step_fn, build_stateful_gd_step_fn
-from adr.src.training_algorithms import step_fn_builder 
+from adr.src.training_algorithms import step_fn_builder
 from adr.src.channels import Channel, UplinkMimoChannel
 from adr.src.utils import CovarianceType, Metric, TrainingMethod
 from adr.src.utils import bit_array_to_index, index_to_bit_array, complex_to_stacked_real, stacked_real_to_complex
 
 __all__ = [
-    DeepSICBlock,
+    Detector,
     DeepSIC,
-    BayesianDeepSIC,
     ResNetDetector,
-    BayesianResNetDetector,
 
     build_sgd_train_fn,
     build_gd_step_fn,

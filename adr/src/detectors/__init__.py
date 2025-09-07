@@ -2,15 +2,11 @@
 Detectors.
 """
 
-from adr.src.detectors.deepsic import DeepSICBlock, DeepSIC
-from adr.src.detectors.bayesian_deepsic import BayesianDeepSIC
-from adr.src.detectors.resnet_detector import ResNetDetector
-from adr.src.detectors.bayesian_resnet_detector import BayesianResNetDetector
-
+from adr.src.detectors.base import Detector
+from adr.src.detectors.deepsic import DeepSIC
+from adr.src.detectors.resnet import ResNetDetector
 __all__ = [
-    DeepSICBlock,
+    Detector,
     DeepSIC,
-    BayesianDeepSIC,
     ResNetDetector,
-    BayesianResNetDetector
 ]

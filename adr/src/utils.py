@@ -6,6 +6,7 @@ from jax import Array
 
 class CovarianceType(Enum):
     FULL = "full"
+    DLR = "dlr"
     DG = "diagonal"
 
 class TrainingMethod(Enum):

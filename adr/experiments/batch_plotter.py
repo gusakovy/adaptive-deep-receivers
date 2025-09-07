@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 from adr.experiments.utils import load_config, generate_config_hash
-from adr.experiments.framework.batch_runner import run_batch_experiments, expand_config_lists
-from adr.experiments.framework.single_runner import load_experiment_by_hash
+from adr.experiments.batch_runner import run_batch_experiments, expand_config_lists
+from adr.experiments.single_runner import load_experiment_by_hash
 
 
 def load_batch_results(
@@ -369,7 +369,7 @@ def main():
     parser = argparse.ArgumentParser(description='Plot batch experiment results')
     parser.add_argument('--config_path', type=str,
                         help='Path to batch configuration file',
-                        default='adr/experiments/framework/batch_config.json')
+                        default='adr/experiments/batch_config.json')
     parser.add_argument('--x_param', type=str,
                         help='Parameter to plot on x-axis (dot-separated path)')
     parser.add_argument('--y_metric', type=str, default='avg_track_ber',

@@ -22,6 +22,9 @@ def build_sgd_train_fn(
     def init_state(apply_fn, params):
         return TrainState.create(apply_fn=apply_fn, params=params, tx=optimizer(learning_rate))
 
+    def extract_params(state):
+        return state.params
+
     @jax.jit
     def train_fn(key, state, inputs, labels):
         keys = jr.split(key, num_epochs)
@@ -64,7 +67,7 @@ def build_sgd_train_fn(
 
         return state, outputs
 
-    return init_state, train_fn
+    return init_state, extract_params, train_fn
 
 class GDState(NamedTuple):
     params: Array
@@ -81,6 +84,9 @@ def build_gd_step_fn(
 
     def init_state(apply_fn, params):
         return GDState(params)
+    
+    def extract_params(state):
+        return state.params
 
     def predict_fn(state: GDState, dynamics_decay: float) -> GDState:
         return GDState(dynamics_decay * state.params)
@@ -100,7 +106,7 @@ def build_gd_step_fn(
         return (new_state, input, target), None
 
     @jax.jit
-    def step_fn(state, input: Array, target: Array) -> tuple[GDState, Array]:
+    def step_fn(key, state, input: Array, target: Array) -> tuple[GDState, Array]:
         """Single training step for the specified method and configuration."""
         predicted_state = predict_fn(state, dynamics_decay)
         (updated_state, _, _), _ = jax.lax.scan(update_fn, (predicted_state, input, target), jnp.arange(num_iter))
@@ -109,7 +115,7 @@ def build_gd_step_fn(
 
         return updated_state, prediction
 
-    return init_state, step_fn
+    return init_state, extract_params, step_fn
 
 def build_stateful_gd_step_fn(
         loss_fn: callable,
@@ -123,6 +129,9 @@ def build_stateful_gd_step_fn(
 
     def init_state(apply_fn, params):
         return TrainState.create(apply_fn=apply_fn, params=params, tx=optimizer(learning_rate))
+
+    def extract_params(state):
+        return state.params
 
     def update_fn(carry, _):
         state, input, target = carry
@@ -139,7 +148,7 @@ def build_stateful_gd_step_fn(
         return (state, input, target), None
 
     @jax.jit 
-    def step_fn(state, input, target):
+    def step_fn(key, state, input, target):
         # Apply dynamics decay
         state = state.replace(params=dynamics_decay*state.params)
 
@@ -152,4 +161,4 @@ def build_stateful_gd_step_fn(
 
         return state, prediction
 
-    return init_state, step_fn
+    return init_state, extract_params, step_fn

@@ -1,4 +1,3 @@
-from typing import Union
 import os
 import math
 from copy import deepcopy
@@ -9,7 +8,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from tqdm import tqdm
 import optax
-from adr import DeepSIC, BayesianDeepSIC, ResNetDetector, BayesianResNetDetector
+from adr import Detector, DeepSIC, ResNetDetector
 from adr import CovarianceType, TrainingMethod, UplinkMimoChannel
 from adr import step_fn_builder, build_gd_step_fn, build_sgd_train_fn
 from adr.src.channels.modulations import MODULATIONS
@@ -18,6 +17,7 @@ from adr.experiments.utils import load_config, generate_config_hash, prepare_exp
 
 COV_TYPE_MAP = {
     'full': CovarianceType.FULL,
+    'dlr': CovarianceType.DLR,
     'diag': CovarianceType.DG
 }
 
@@ -110,6 +110,13 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
         print(f"Warning: Full covariance methods will run out of memory for ResNet model, setting covariance_type to diag")
         cleaned_config['algorithm']['covariance_type'] = 'diag'
 
+    if cleaned_config['algorithm'].get('covariance_type', None) == 'dlr':
+        if cleaned_config['algorithm'].get('rank', None) is None:
+            print(f"Missing required rank parameter for DLR covariance type, setting rank to 10")
+            cleaned_config['algorithm']['rank'] = 10
+    else:
+        cleaned_config['algorithm'].pop('rank', None)
+
     if not(cleaned_config['algorithm'].get('linplugin', True) or cleaned_config['algorithm'].get('empirical_fisher', True)):
         # We don't allow MC-based methods gradients without empirical fisher due to computational complexity
         print(f"Warning: Running without linplugin requires empirical fisher, setting empirical_fisher to true")
@@ -127,35 +134,20 @@ def clean_config(config: dict[str, any]) -> dict[str, any]:
 
     return cleaned_config
 
-def create_model(config: dict[str, any], key: Array) -> Union[DeepSIC, BayesianDeepSIC, ResNetDetector, BayesianResNetDetector]:
+def create_model(config: dict[str, any], key: Array) -> Detector:
     """Create a DeepSIC model based on configuration."""
     model_config = config['model']
     channel_config = config['channel']
-    algo_config = config['algorithm']
     model_type = model_config['type'].lower()
 
-    if algo_config['method'] in ['gd', 'sgd']:
-        model_class = DeepSIC if model_type == 'deepsic' else ResNetDetector
-        model = model_class(
-            key=key,
-            symbol_bits=int(math.log2(len(MODULATIONS[channel_config['modulation']]))),
-            num_users=channel_config['num_users'],
-            num_antennas=channel_config['num_antennas'],
-            num_layers=model_config['num_layers'],
-            hidden_dim=model_config['hidden_dim']
-        )
-    else:
-        cov_type = COV_TYPE_MAP[algo_config['covariance_type'].lower()]
-        model_class = BayesianDeepSIC if model_type == 'deepsic' else BayesianResNetDetector
-        model = model_class(
-            key=key,
-            symbol_bits=int(math.log2(len(MODULATIONS[channel_config['modulation']]))),
-            num_users=channel_config['num_users'],
-            num_antennas=channel_config['num_antennas'],
-            num_layers=model_config['num_layers'],
-            hidden_dim=model_config['hidden_dim'],
-            cov_type=cov_type,
-            init_cov_scale=model_config['init_param_cov']
+    model_class = DeepSIC if model_type == 'deepsic' else ResNetDetector
+    model = model_class(
+        key=key,
+        symbol_bits=int(math.log2(len(MODULATIONS[channel_config['modulation']]))),
+        num_users=channel_config['num_users'],
+        num_antennas=channel_config['num_antennas'],
+        num_layers=model_config['num_layers'],
+        hidden_dim=model_config['hidden_dim']
     )
     return model
 
@@ -172,7 +164,7 @@ def create_channel(config: dict[str, any]) -> UplinkMimoChannel:
     )
     return channel
 
-def create_online_learning_function(config: dict[str, any], model: BayesianDeepSIC) -> callable:
+def create_online_learning_function(config: dict[str, any], model: Detector) -> callable:
     """Create an online learning function based on algorithm configuration."""
     model_config = config['model']
     algo_config = config['algorithm']
@@ -180,17 +172,17 @@ def create_online_learning_function(config: dict[str, any], model: BayesianDeepS
     method = METHOD_MAP[algo_config['method'].lower()]
 
     if method == TrainingMethod.GD:
-        init_state, step_fn = build_gd_step_fn(
+        init_state, extract_params, step_fn = build_gd_step_fn(
             apply_fn=model.apply_fn,
             loss_fn=optax.sigmoid_binary_cross_entropy,
             dynamics_decay=algo_config['dynamics_decay'],
             num_iter=algo_config['num_iter'],
             learning_rate=algo_config['learning_rate'],
         )
-        return init_state, step_fn
+        return init_state, extract_params, step_fn
 
     elif method == TrainingMethod.SGD:
-        init_state, train_fn = build_sgd_train_fn(
+        init_state, extract_params, train_fn = build_sgd_train_fn(
             loss_fn=optax.sigmoid_binary_cross_entropy,
             dynamics_decay=algo_config['dynamics_decay'],
             num_epochs=algo_config['num_iter'],
@@ -199,19 +191,26 @@ def create_online_learning_function(config: dict[str, any], model: BayesianDeepS
             optimizer=optax.adam,
             learning_rate=algo_config['learning_rate']
         )
-        return init_state, train_fn
+        return init_state, extract_params, train_fn
 
     else:
         cov_type = COV_TYPE_MAP[algo_config['covariance_type'].lower()]
         obs_cov = algo_config['obs_cov_scale'] * jnp.eye(model.symbol_bits if model_type == 'deepsic' else model.output_size)
-        process_noise =  jnp.eye(model.params_mean.shape[-1]) if model.cov_type == CovarianceType.FULL else jnp.ones(model.params_mean.shape[-1])
+        if cov_type == CovarianceType.FULL:
+            process_noise = jnp.eye(model.params.shape[-1])
+        elif cov_type == CovarianceType.DLR:
+            process_noise = 1
+        elif cov_type == CovarianceType.DG:
+            process_noise = jnp.ones(model.params.shape[-1])
         process_noise = algo_config['process_noise'] * process_noise
 
-        step_fn = step_fn_builder(
+        init_state, extract_params, step_fn = step_fn_builder(
             method=method,
             apply_fn=model.apply_fn,
             obs_cov=obs_cov,
             covariance_type=cov_type,
+            rank=algo_config.get('rank', 10),
+            init_cov_scale=model_config['init_param_cov'],
             linplugin=algo_config['linplugin'],
             reparameterized=algo_config['reparameterized'],
             dynamics_decay=algo_config['dynamics_decay'],
@@ -222,16 +221,16 @@ def create_online_learning_function(config: dict[str, any], model: BayesianDeepS
             learning_rate=algo_config.get('learning_rate', 0.1),
             num_iter=algo_config.get('num_iter', 1)
         )
-        return None, step_fn
+        return init_state, extract_params, step_fn
 
-def test_model(model: BayesianDeepSIC, test_rx: jnp.ndarray, test_labels: jnp.ndarray) -> float:
+def test_model(model: Detector, test_rx: jnp.ndarray, test_labels: jnp.ndarray) -> float:
     """Test model and return bit error rate."""
     predictions = model.soft_decode(test_rx)
     predicted_labels = (predictions > 0.5).astype(jnp.float32)
     accuracy = (predicted_labels == test_labels).mean()
     return float(1 - accuracy)
 
-def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], BayesianDeepSIC]:
+def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
     """Run a single experiment based on configuration and return results and trained model."""
     key = jr.PRNGKey(config['experiment']['seed'])
     model_key, data_key = jr.split(key)
@@ -241,7 +240,7 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], BayesianDeep
     # Initialize channel, model, and step function
     channel = create_channel(config)
     model = create_model(config, model_key)
-    state_init_fn, online_learning_fn = create_online_learning_function(config, model)
+    state_init_fn, extract_params, online_learning_fn = create_online_learning_function(config, model)
 
     # Prepare data
     sync_frames = config['experiment']['sync_frames']
@@ -281,15 +280,18 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], BayesianDeep
             model.classic_fit(
                 rx=train_rx,
                 labels=train_labels,
-                train_block_fn=online_learning_fn,
                 state_init_fn=state_init_fn,
+                extract_params=extract_params,
+                train_block_fn=online_learning_fn,
             )
         else:
             model.streaming_fit(
                 rx=train_rx,
                 labels=train_labels,
-                step_fn=online_learning_fn,
                 state_init_fn=state_init_fn,
+                extract_params=extract_params,
+                step_fn=online_learning_fn,
+                save_history=False,
             )
         test_rx, test_labels = next(test_dataloader_iterator)
         ber = test_model(model, test_rx, test_labels)
@@ -301,15 +303,18 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], BayesianDeep
             model.classic_fit(
                 rx=train_rx,
                 labels=train_labels,
-                train_block_fn=online_learning_fn,
                 state_init_fn=state_init_fn,
+                extract_params=extract_params,
+                train_block_fn=online_learning_fn,
             )
         else:
             model.streaming_fit(
                 rx=train_rx,
                 labels=train_labels,
-                step_fn=online_learning_fn,
                 state_init_fn=state_init_fn,
+                extract_params=extract_params,
+                step_fn=online_learning_fn,
+                save_history=False,
             )
         test_rx, test_labels = next(test_dataloader_iterator)
         ber = test_model(model, test_rx, test_labels)
@@ -327,7 +332,7 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], BayesianDeep
     }
     return results, model
 
-def save_results(results: dict[str, any], model: BayesianDeepSIC, config: dict[str, any], base_output_dir: str) -> str:
+def save_results(results: dict[str, any], model: Detector, config: dict[str, any], base_output_dir: str) -> str:
     """Save experiment results and model state to hash-based folder structure."""
     config_hash = generate_config_hash(config)
     output_dir = os.path.join(base_output_dir, config_hash)
@@ -394,7 +399,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='Run experiment from JSON config')
-    parser.add_argument('--config_path', type=str, help='Path to experiment config JSON file', default='adr/experiments/framework/single_config.json')
+    parser.add_argument('--config_path', type=str, help='Path to experiment config JSON file', default='adr/experiments/single_config.json')
     parser.add_argument('--output_dir', type=str, help='Base output directory for results', default='adr/experiments/results')
 
     args = parser.parse_args()

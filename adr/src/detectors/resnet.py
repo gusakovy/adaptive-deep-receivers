@@ -125,13 +125,14 @@ class ResNetDetector(Detector):
         predictions = self.apply_fn(self.params, rx)
         return jax.nn.sigmoid(predictions).reshape(rx.shape[0], self.num_users, self.symbol_bits)
 
-    def classic_fit(self, rx: Array, labels: Array, state_init_fn: callable, train_block_fn: callable, **kwargs) -> None:
+    def classic_fit(self, rx: Array, labels: Array, state_init_fn: callable, extract_params: callable, train_block_fn: callable, **kwargs) -> None:
         """Fit model on all samples using the provided training function.
 
         Args:
             rx (Array): Received signal(s).
             labels (Array): Bitwise labels corresponding to the received signal(s).
             state_init_fn (callable): Function to initialize the state.
+            extract_params (callable): Function to extract the parameters from the state.
             train_block_fn (callable): Training step for the entire model.
         """
         fit_key, self.fit_key = jr.split(self.fit_key)
@@ -146,21 +147,25 @@ class ResNetDetector(Detector):
         self.train_state, _ = train_block_fn(fit_key, self.train_state, rx, labels_flat)
 
         # Update the parameters
-        self.params = self.train_state.params
+        self.params = extract_params(self.train_state)
 
-    def streaming_fit(self, rx: Array, labels: Array, state_init_fn: callable, step_fn: callable, save_history: bool = False, **kwargs) -> Array:
+    def streaming_fit(self, rx: Array, labels: Array, state_init_fn: callable, extract_params: callable, step_fn: callable, save_history: bool = False, **kwargs) -> Array:
         """Fit model on samples one by one.
 
         Args:
             rx (Array): Received signal(s).
             labels (Array): Bitwise labels corresponding to the received signal(s).
             state_init_fn (callable): Function to initialize the state.
+            extract_params (callable): Function to extract the parameters from the state.
             step_fn (callable): Training step function.
             save_history (bool, optional): Whether to save and return the state history. Defaults to False.
 
         Returns:
             Array: State history if save_history is True, otherwise None.
         """
+        fit_key, self.fit_key = jr.split(self.fit_key)
+        fit_keys = jr.split(fit_key, rx.shape[0])
+        
         if self.train_state is None:
             self.train_state = state_init_fn(self.apply_fn, self.params)
 
@@ -168,18 +173,18 @@ class ResNetDetector(Detector):
         labels_flat = labels.reshape(rx.shape[0], -1)
 
         def process_sample(state, args):
-            inputs, labels = args
-            state, prediction = step_fn(state, inputs, labels)
+            key, rx, labels = args
+            state, prediction = step_fn(key, state, rx, labels)
             state_history = state if save_history else None
             return state, state_history
 
         self.train_state, state_history = jax.lax.scan(
             process_sample, 
             init=self.train_state, 
-            xs=(rx, labels_flat)
+            xs=(fit_keys, rx, labels_flat)
         )
 
-        self.params = self.train_state.params
+        self.params = extract_params(self.train_state)
         return state_history
 
     def save(self, path: str):

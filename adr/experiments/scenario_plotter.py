@@ -6,7 +6,7 @@ import seaborn as sns
 import argparse
 from tqdm import tqdm
 from adr.experiments.utils import load_config, generate_config_hash
-from adr.experiments.framework.single_runner import run_experiment, save_results, load_experiment_by_hash
+from adr.experiments.single_runner import run_experiment, save_results, load_experiment_by_hash
 
 
 def find_array_param(config: dict[str, any]) -> tuple[str, list]:
@@ -382,7 +382,7 @@ def main():
                         default='adr/experiments/best_algo_configs')
     parser.add_argument('--base_config', type=str,
                         help='Path to base configuration file',
-                        default='adr/experiments/framework/scenario_config.json')
+                        default='adr/experiments/scenario_config.json')
     parser.add_argument('--output_dir', type=str,
                         help='Directory for experiment results',
                         default='adr/experiments/results')

@@ -4,7 +4,7 @@ from copy import deepcopy
 from tqdm import tqdm
 import argparse
 from adr.experiments.utils import load_config, generate_config_hash
-from adr.experiments.framework.single_runner import run_experiment, save_results, clean_config
+from adr.experiments.single_runner import run_experiment, save_results, clean_config
 
 
 def expand_config_lists(config: dict[str, any]) -> list[dict[str, any]]:
@@ -149,7 +149,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run batch experiments from config with list parameters')
     parser.add_argument('--config_path', type=str, 
                         help='Path to batch experiment config JSON file',
-                        default='adr/experiments/framework/batch_config.json')
+                        default='adr/experiments/batch_config.json')
     parser.add_argument('--output_dir', type=str, 
                         help='Base output directory for results',
                         default='adr/experiments/results')
