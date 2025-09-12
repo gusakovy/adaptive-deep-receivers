@@ -1,3 +1,4 @@
+import time
 import os
 import math
 from copy import deepcopy
@@ -12,7 +13,7 @@ from adr import Detector, DeepSIC, ResNetDetector
 from adr import CovarianceType, TrainingMethod, UplinkMimoChannel
 from adr import step_fn_builder, build_gd_step_fn, build_sgd_train_fn
 from adr.src.channels.modulations import MODULATIONS
-from adr.experiments.utils import load_config, generate_config_hash, prepare_experiment_data
+from adr.experiments.utils import load_config, generate_config_hash, prepare_experiment_data, prepare_single_batch
 
 
 COV_TYPE_MAP = {
@@ -230,6 +231,61 @@ def test_model(model: Detector, test_rx: jnp.ndarray, test_labels: jnp.ndarray) 
     accuracy = (predicted_labels == test_labels).mean()
     return float(1 - accuracy)
 
+def measure_runtimes(model, state_init_fn: callable, extract_params: callable, online_learning_fn: callable, channel: UplinkMimoChannel, config: dict[str, any]) -> tuple[float, float]:
+    # Snapshot model
+    model.save('tmp')
+
+    rx, labels = prepare_single_batch(channel=channel, num_samples=2048, frame_idx=0, snr=0, key=jr.PRNGKey(0))
+    # First call contains compilation time
+    if config['algorithm']['method'] == 'sgd':
+        model.classic_fit(
+                rx=rx,
+                labels=labels,
+                state_init_fn=state_init_fn,
+                extract_params=extract_params,
+                train_block_fn=online_learning_fn,
+            )
+        model.params.block_until_ready()
+    else:
+        model.streaming_fit(
+            rx=rx,
+            labels=labels,
+            state_init_fn=state_init_fn,
+            extract_params=extract_params,
+            step_fn=online_learning_fn,
+        )
+        model.params.block_until_ready()
+    result = model.soft_decode(rx)
+    result.block_until_ready()
+
+    start_time = time.time()
+    if config['algorithm']['method'] == 'sgd':
+        model.classic_fit(
+                rx=rx,
+                labels=labels,
+                state_init_fn=state_init_fn,
+                extract_params=extract_params,
+                train_block_fn=online_learning_fn,
+            )
+        model.params.block_until_ready()
+    else:
+        model.streaming_fit(
+            rx=rx,
+            labels=labels,
+            state_init_fn=state_init_fn,
+            extract_params=extract_params,
+            step_fn=online_learning_fn,
+        )
+        model.params.block_until_ready()
+    training_time = (time.time() - start_time) / 2048
+    start_time = time.time()
+    model.soft_decode(rx).block_until_ready()
+    inference_time = (time.time() - start_time) / 2048
+    model.load('tmp')
+    os.remove('tmp')
+
+    return training_time, inference_time
+
 def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
     """Run a single experiment based on configuration and return results and trained model."""
     key = jr.PRNGKey(config['experiment']['seed'])
@@ -272,6 +328,9 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
         key=test_key
     )
     test_dataloader_iterator = iter(test_dataloader)
+
+    # Measure runtimes
+    training_time, inference_time = measure_runtimes(model, state_init_fn, extract_params, online_learning_fn, channel, config)
 
     ber_array = []
     # Sync phase
@@ -328,7 +387,9 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
         'avg_track_ber': jnp.mean(jnp_ber_array[config['experiment']['sync_frames']:]),
         'std_track_ber': jnp.std(jnp_ber_array[config['experiment']['sync_frames']:]),
         'p95_track_ber': jnp.percentile(jnp_ber_array[config['experiment']['sync_frames']:], 95),
-        'p99_track_ber': jnp.percentile(jnp_ber_array[config['experiment']['sync_frames']:], 99)
+        'p99_track_ber': jnp.percentile(jnp_ber_array[config['experiment']['sync_frames']:], 99),
+        'training_time_per_sample': training_time,
+        'inference_time_per_sample': inference_time,
     }
     return results, model
 
