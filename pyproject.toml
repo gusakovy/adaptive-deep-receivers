@@ -11,10 +11,10 @@ authors = [
 ]
 dependencies = [
   "jax>=0.6.0",
-  "dynamax",
   "flax",
   "jax-tqdm",
-  "matplotlib",
+  "jax-dataloader",
+  "seaborn",
 ]
 description = "Adaptive Deep Receivers"
 dynamic = ["version"]
