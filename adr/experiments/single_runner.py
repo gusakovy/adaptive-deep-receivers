@@ -4,6 +4,7 @@ import math
 from copy import deepcopy
 import json
 import pickle
+import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
@@ -391,6 +392,7 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
         'training_time_per_sample': training_time,
         'inference_time_per_sample': inference_time,
     }
+    jax.clear_caches()
     return results, model
 
 def save_results(results: dict[str, any], model: Detector, config: dict[str, any], base_output_dir: str) -> str:

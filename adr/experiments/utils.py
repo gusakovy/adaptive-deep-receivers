@@ -77,7 +77,7 @@ def prepare_experiment_data(channel: UplinkMimoChannel, num_samples: int, num_fr
     label_blocks = jnp.zeros((0, 0))
     receive_blocks = jnp.zeros((0, 0))
     for frame_idx in range(start_frame, start_frame + num_frames):
-        rx, labels = prepare_single_batch(channel, num_samples, frame_idx, snr, subkeys[frame_idx] if key is not None else None)
+        rx, labels = prepare_single_batch(channel, num_samples, frame_idx, snr, subkeys[frame_idx-start_frame] if key is not None else None)
         label_blocks = labels if frame_idx == start_frame else jnp.concatenate([label_blocks, labels], axis=0)
         receive_blocks = rx if frame_idx == start_frame else jnp.concatenate([receive_blocks, rx], axis=0)
 
