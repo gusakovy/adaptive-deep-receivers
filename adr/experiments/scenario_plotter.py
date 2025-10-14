@@ -313,7 +313,10 @@ def create_time_series_plot(
     xlabel: str = None,
     ylabel: str = None,
     save_name: str = None,
-    no_error_bars: bool = False
+    no_error_bars: bool = False,
+    alloc_windows: int | None = None,
+    sync_frames: int | None = None,
+    track_frames: int | None = None
     ) -> plt.Figure:
     """Create a time series plot where x-axis is time index."""
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -353,6 +356,13 @@ def create_time_series_plot(
                 color=plot_params[algorithm].get('color', color),
                 alpha=0.2
                 )
+
+    # Add vertical lines at reset boundaries
+    if alloc_windows > 1:
+        window_size = sync_frames + track_frames
+        boundary_positions = [k * window_size for k in range(1, alloc_windows)]
+        for x in boundary_positions:
+            ax.axvline(x=x, linestyle='--', color='gray', alpha=0.5, label=None)
 
     # Formatting
     y_param_name = y_param.replace('_', ' ').title()
@@ -460,7 +470,10 @@ def main():
             xlabel=args.xlabel,
             ylabel=args.ylabel,
             save_name=args.save_name,
-            no_error_bars=args.no_error_bars
+            no_error_bars=args.no_error_bars,
+            alloc_windows=base_config.get('experiment', {}).get('alloc_windows', 1),
+            sync_frames=base_config.get('experiment', {}).get('sync_frames', None),
+            track_frames=base_config.get('experiment', {}).get('track_frames', None)
         )
 
     else: # Regular mode: find array parameter in config

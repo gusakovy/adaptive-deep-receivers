@@ -232,9 +232,14 @@ def test_model(model: Detector, test_rx: jnp.ndarray, test_labels: jnp.ndarray) 
     accuracy = (predicted_labels == test_labels).mean()
     return float(1 - accuracy)
 
-def measure_runtimes(model, state_init_fn: callable, extract_params: callable, online_learning_fn: callable, channel: UplinkMimoChannel, config: dict[str, any]) -> tuple[float, float]:
-    # Snapshot model
-    model.save('tmp')
+def measure_runtimes(
+    model,
+    state_init_fn: callable,
+    extract_params: callable,
+    online_learning_fn: callable,
+    channel: UplinkMimoChannel,
+    config: dict[str, any]
+    ) -> tuple[float, float]:
 
     rx, labels = prepare_single_batch(channel=channel, num_samples=2048, frame_idx=0, snr=0, key=jr.PRNGKey(0))
     # First call contains compilation time
@@ -282,8 +287,6 @@ def measure_runtimes(model, state_init_fn: callable, extract_params: callable, o
     start_time = time.time()
     model.soft_decode(rx).block_until_ready()
     inference_time = (time.time() - start_time) / 2048
-    model.load('tmp')
-    os.remove('tmp')
 
     return training_time, inference_time
 
@@ -302,100 +305,121 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
     # Prepare data
     sync_frames = config['experiment']['sync_frames']
     track_frames = config['experiment']['track_frames']
-    total_frames = sync_frames + track_frames
+    alloc_windows = int(config['experiment'].get('alloc_windows', 1))
+    if alloc_windows < 1:
+        alloc_windows = 1
+    total_frames_per_window = sync_frames + track_frames
 
-    if not total_frames > 0:
+    if not total_frames_per_window > 0:
         raise ValueError("Total frames must be greater than 0")
-
-    if sync_frames > 0:
-        sync_dataloader = prepare_experiment_data(
-            channel=channel,
-            num_samples=config['experiment']['symbols_per_frame'],
-            num_frames=sync_frames,
-            snr=config['channel']['snr'],
-            key=sync_key
-        )
-
-    if track_frames > 0:
-        track_dataloader = prepare_experiment_data(
-            channel=channel,
-            num_samples=config['experiment']['pilot_per_frame'],
-            num_frames=track_frames,
-            snr=config['channel']['snr'],
-            key=track_key,
-            start_frame=sync_frames
-        )
-
-    test_dataloader = prepare_experiment_data(
-        channel=channel,
-        num_samples=config['experiment']['test_dim'],
-        num_frames=total_frames,
-        snr=config['channel']['snr'],
-        key=test_key
-    )
-    test_dataloader_iterator = iter(test_dataloader)
 
     # Measure runtimes
     training_time, inference_time = measure_runtimes(model, state_init_fn, extract_params, online_learning_fn, channel, config)
 
     ber_array = []
-    # Sync phase
-    if sync_frames > 0:
-        for train_rx, train_labels in tqdm(sync_dataloader, total=sync_frames, leave=False, desc='Sync frames'):
-            if config['algorithm']['method'] == 'sgd':
-                model.classic_fit(
-                    rx=train_rx,
-                    labels=train_labels,
-                    state_init_fn=state_init_fn,
-                    extract_params=extract_params,
-                    train_block_fn=online_learning_fn,
-                )
-            else:
-                model.streaming_fit(
-                    rx=train_rx,
-                    labels=train_labels,
-                    state_init_fn=state_init_fn,
-                    extract_params=extract_params,
-                    step_fn=online_learning_fn,
-                    save_history=False,
-                )
-            test_rx, test_labels = next(test_dataloader_iterator)
-            ber = test_model(model, test_rx, test_labels)
-            ber_array.append(ber)
+    last_sync_end_index = None
+    # Repeat cycles of sync + track, resetting the model each user allocation window
+    for window_idx in tqdm(range(alloc_windows), total=alloc_windows, leave=False, desc='Allocation windows'):
+        # Reset model parameters at the beginning of each user allocation window
+        model = create_model(config, model_key)
 
-    # Track phase
-    if track_frames > 0:
-        for train_rx, train_labels in tqdm(track_dataloader, total=track_frames, leave=False, desc='Track frames'):
-            if config['algorithm']['method'] == 'sgd':
-                model.classic_fit(
-                    rx=train_rx,
-                    labels=train_labels,
-                    state_init_fn=state_init_fn,
-                    extract_params=extract_params,
-                    train_block_fn=online_learning_fn,
-                )
-            else:
-                model.streaming_fit(
-                    rx=train_rx,
-                    labels=train_labels,
-                    state_init_fn=state_init_fn,
-                    extract_params=extract_params,
-                    step_fn=online_learning_fn,
-                    save_history=False,
-                )
-            test_rx, test_labels = next(test_dataloader_iterator)
-            ber = test_model(model, test_rx, test_labels)
-            ber_array.append(ber)
+        window_start = window_idx * (sync_frames + track_frames)
+
+        test_dataloader = prepare_experiment_data(
+        channel=channel,
+        num_samples=config['experiment']['test_dim'],
+        num_frames=total_frames_per_window,
+        snr=config['channel']['snr'],
+        key=test_key,
+        start_frame=window_start
+        )
+        test_dataloader_iterator = iter(test_dataloader)
+
+        # Sync phase for this allocation window
+        if sync_frames > 0:
+            sync_dataloader = prepare_experiment_data(
+                channel=channel,
+                num_samples=config['experiment']['symbols_per_frame'],
+                num_frames=sync_frames,
+                snr=config['channel']['snr'],
+                key=sync_key,
+                start_frame=window_start
+            )
+            for train_rx, train_labels in tqdm(sync_dataloader, total=sync_frames, leave=False, desc='Sync frames'):
+                if config['algorithm']['method'] == 'sgd':
+                    model.classic_fit(
+                        rx=train_rx,
+                        labels=train_labels,
+                        state_init_fn=state_init_fn,
+                        extract_params=extract_params,
+                        train_block_fn=online_learning_fn,
+                    )
+                else:
+                    model.streaming_fit(
+                        rx=train_rx,
+                        labels=train_labels,
+                        state_init_fn=state_init_fn,
+                        extract_params=extract_params,
+                        step_fn=online_learning_fn,
+                        save_history=False,
+                    )
+                test_rx, test_labels = next(test_dataloader_iterator)
+                ber = test_model(model, test_rx, test_labels)
+                ber_array.append(ber)
+            last_sync_end_index = len(ber_array) - 1
+
+        # Track phase for this allocation window
+        if track_frames > 0:
+            track_dataloader = prepare_experiment_data(
+                channel=channel,
+                num_samples=config['experiment']['pilot_per_frame'],
+                num_frames=track_frames,
+                snr=config['channel']['snr'],
+                key=track_key,
+                start_frame=window_start + sync_frames
+            )
+            for train_rx, train_labels in tqdm(track_dataloader, total=track_frames, leave=False, desc='Track frames'):
+                if config['algorithm']['method'] == 'sgd':
+                    model.classic_fit(
+                        rx=train_rx,
+                        labels=train_labels,
+                        state_init_fn=state_init_fn,
+                        extract_params=extract_params,
+                        train_block_fn=online_learning_fn,
+                    )
+                else:
+                    model.streaming_fit(
+                        rx=train_rx,
+                        labels=train_labels,
+                        state_init_fn=state_init_fn,
+                        extract_params=extract_params,
+                        step_fn=online_learning_fn,
+                        save_history=False,
+                    )
+                test_rx, test_labels = next(test_dataloader_iterator)
+                ber = test_model(model, test_rx, test_labels)
+                ber_array.append(ber)
 
     # Compile results
     jnp_ber_array = jnp.array(ber_array)
+    # Compute metrics over all track frames across allocation windows
+    if track_frames > 0:
+        track_segments = []
+        for window_idx in range(alloc_windows):
+            start_idx = window_idx * (sync_frames + track_frames) + sync_frames
+            end_idx = start_idx + track_frames
+            track_segments.append(jnp_ber_array[start_idx:end_idx])
+        track_concat = jnp.concatenate(track_segments) if track_segments else jnp.array([])
+    else:
+        track_concat = jnp.array([])
+
     results = {
         'ber': ber_array,
-        'final_sync_ber': ber_array[sync_frames - 1] if sync_frames > 0 else None,
-        'avg_track_ber': jnp.mean(jnp_ber_array[sync_frames:]) if track_frames > 0 else None,
-        'std_track_ber': jnp.std(jnp_ber_array[sync_frames:]) if track_frames > 0 else None,
-        'p95_track_ber': jnp.percentile(jnp_ber_array[sync_frames:], 95) if track_frames > 0 else None,
-        'p99_track_ber': jnp.percentile(jnp_ber_array[sync_frames:], 99) if track_frames > 0 else None,
+        'final_sync_ber': float(jnp_ber_array[last_sync_end_index]) if last_sync_end_index is not None else None,
+        'avg_track_ber': float(jnp.mean(track_concat)) if track_concat.size > 0 else None,
+        'std_track_ber': float(jnp.std(track_concat)) if track_concat.size > 0 else None,
+        'p95_track_ber': float(jnp.percentile(track_concat, 95)) if track_concat.size > 0 else None,
+        'p99_track_ber': float(jnp.percentile(track_concat, 99)) if track_concat.size > 0 else None,
         'training_time_per_sample': training_time,
         'inference_time_per_sample': inference_time,
     }
