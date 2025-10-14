@@ -304,22 +304,27 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
     track_frames = config['experiment']['track_frames']
     total_frames = sync_frames + track_frames
 
-    sync_dataloader = prepare_experiment_data(
-        channel=channel,
-        num_samples=config['experiment']['symbols_per_frame'],
-        num_frames=sync_frames,
-        snr=config['channel']['snr'],
-        key=sync_key
-    )
+    if not total_frames > 0:
+        raise ValueError("Total frames must be greater than 0")
 
-    track_dataloader = prepare_experiment_data(
-        channel=channel,
-        num_samples=config['experiment']['pilot_per_frame'],
-        num_frames=track_frames,
-        snr=config['channel']['snr'],
-        key=track_key,
-        start_frame=sync_frames
-    )
+    if sync_frames > 0:
+        sync_dataloader = prepare_experiment_data(
+            channel=channel,
+            num_samples=config['experiment']['symbols_per_frame'],
+            num_frames=sync_frames,
+            snr=config['channel']['snr'],
+            key=sync_key
+        )
+
+    if track_frames > 0:
+        track_dataloader = prepare_experiment_data(
+            channel=channel,
+            num_samples=config['experiment']['pilot_per_frame'],
+            num_frames=track_frames,
+            snr=config['channel']['snr'],
+            key=track_key,
+            start_frame=sync_frames
+        )
 
     test_dataloader = prepare_experiment_data(
         channel=channel,
@@ -335,60 +340,62 @@ def run_experiment(config: dict[str, any]) -> tuple[dict[str, any], Detector]:
 
     ber_array = []
     # Sync phase
-    for train_rx, train_labels in tqdm(sync_dataloader, total=sync_frames, leave=False, desc='Sync frames'):
-        if config['algorithm']['method'] == 'sgd':
-            model.classic_fit(
-                rx=train_rx,
-                labels=train_labels,
-                state_init_fn=state_init_fn,
-                extract_params=extract_params,
-                train_block_fn=online_learning_fn,
-            )
-        else:
-            model.streaming_fit(
-                rx=train_rx,
-                labels=train_labels,
-                state_init_fn=state_init_fn,
-                extract_params=extract_params,
-                step_fn=online_learning_fn,
-                save_history=False,
-            )
-        test_rx, test_labels = next(test_dataloader_iterator)
-        ber = test_model(model, test_rx, test_labels)
-        ber_array.append(ber)
+    if sync_frames > 0:
+        for train_rx, train_labels in tqdm(sync_dataloader, total=sync_frames, leave=False, desc='Sync frames'):
+            if config['algorithm']['method'] == 'sgd':
+                model.classic_fit(
+                    rx=train_rx,
+                    labels=train_labels,
+                    state_init_fn=state_init_fn,
+                    extract_params=extract_params,
+                    train_block_fn=online_learning_fn,
+                )
+            else:
+                model.streaming_fit(
+                    rx=train_rx,
+                    labels=train_labels,
+                    state_init_fn=state_init_fn,
+                    extract_params=extract_params,
+                    step_fn=online_learning_fn,
+                    save_history=False,
+                )
+            test_rx, test_labels = next(test_dataloader_iterator)
+            ber = test_model(model, test_rx, test_labels)
+            ber_array.append(ber)
 
     # Track phase
-    for train_rx, train_labels in tqdm(track_dataloader, total=track_frames, leave=False, desc='Track frames'):
-        if config['algorithm']['method'] == 'sgd':
-            model.classic_fit(
-                rx=train_rx,
-                labels=train_labels,
-                state_init_fn=state_init_fn,
-                extract_params=extract_params,
-                train_block_fn=online_learning_fn,
-            )
-        else:
-            model.streaming_fit(
-                rx=train_rx,
-                labels=train_labels,
-                state_init_fn=state_init_fn,
-                extract_params=extract_params,
-                step_fn=online_learning_fn,
-                save_history=False,
-            )
-        test_rx, test_labels = next(test_dataloader_iterator)
-        ber = test_model(model, test_rx, test_labels)
-        ber_array.append(ber)
+    if track_frames > 0:
+        for train_rx, train_labels in tqdm(track_dataloader, total=track_frames, leave=False, desc='Track frames'):
+            if config['algorithm']['method'] == 'sgd':
+                model.classic_fit(
+                    rx=train_rx,
+                    labels=train_labels,
+                    state_init_fn=state_init_fn,
+                    extract_params=extract_params,
+                    train_block_fn=online_learning_fn,
+                )
+            else:
+                model.streaming_fit(
+                    rx=train_rx,
+                    labels=train_labels,
+                    state_init_fn=state_init_fn,
+                    extract_params=extract_params,
+                    step_fn=online_learning_fn,
+                    save_history=False,
+                )
+            test_rx, test_labels = next(test_dataloader_iterator)
+            ber = test_model(model, test_rx, test_labels)
+            ber_array.append(ber)
 
     # Compile results
     jnp_ber_array = jnp.array(ber_array)
     results = {
         'ber': ber_array,
-        'final_sync_ber': ber_array[config['experiment']['sync_frames'] - 1],
-        'avg_track_ber': jnp.mean(jnp_ber_array[config['experiment']['sync_frames']:]),
-        'std_track_ber': jnp.std(jnp_ber_array[config['experiment']['sync_frames']:]),
-        'p95_track_ber': jnp.percentile(jnp_ber_array[config['experiment']['sync_frames']:], 95),
-        'p99_track_ber': jnp.percentile(jnp_ber_array[config['experiment']['sync_frames']:], 99),
+        'final_sync_ber': ber_array[sync_frames - 1] if sync_frames > 0 else None,
+        'avg_track_ber': jnp.mean(jnp_ber_array[sync_frames:]) if track_frames > 0 else None,
+        'std_track_ber': jnp.std(jnp_ber_array[sync_frames:]) if track_frames > 0 else None,
+        'p95_track_ber': jnp.percentile(jnp_ber_array[sync_frames:], 95) if track_frames > 0 else None,
+        'p99_track_ber': jnp.percentile(jnp_ber_array[sync_frames:], 99) if track_frames > 0 else None,
         'training_time_per_sample': training_time,
         'inference_time_per_sample': inference_time,
     }
