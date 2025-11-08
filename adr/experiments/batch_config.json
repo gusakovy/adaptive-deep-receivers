@@ -11,7 +11,7 @@
     "num_users": 3,
     "num_antennas": 5,
     "linear_channel": true,
-    "channel_path": "adr/experiments/data/QuaDRiGa_3GPP_Indoor_LOS/eval/channel_coefficients.mat"
+    "channel_path": "adr/experiments/data/QuaDRiGa_3GPP_LOS/eval/channel_coefficients.mat"
   },
   "experiment": {
     "sync_frames": 4,

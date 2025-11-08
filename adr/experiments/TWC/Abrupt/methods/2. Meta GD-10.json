@@ -1,0 +1,15 @@
+{
+  "algorithm": {
+    "method": "gd",
+    "init_params": "adr/experiments/TWC/Abrupt/meta_learned_params.pkl",
+    "dynamics_decay": 0.999,
+    "learning_rate": 0.02,
+    "num_iter": 10
+  },
+  "plot": {
+    "color": "#17becf",
+    "marker": "P",
+    "linestyle": "-",
+    "markersize": 8
+  }
+}

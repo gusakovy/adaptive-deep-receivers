@@ -1,0 +1,12 @@
+# Sionna Linear Channel
+
+    ## Time series
+    .venv/bin/python adr/experiments/scenario_plotter.py \
+        --time_series --y_param "ber" \
+        --base_config "adr/experiments/TWC/Abrupt/sionna_linear_vs_time.json" \
+        --compared_configs_dir "adr/experiments/TWC/Abrupt/methods" \
+        --save_dir "adr/experiments/TWC/Abrupt" \
+        --no_title \
+        --xlabel "Pilot Index" \
+        --ylabel "BER" \
+        --save_name "sionna_lin_ber_vs_time.pdf"

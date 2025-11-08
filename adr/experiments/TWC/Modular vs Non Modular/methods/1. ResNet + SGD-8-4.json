@@ -1,0 +1,21 @@
+{
+  "model": {
+    "type": "resnet",
+    "num_layers": 3,
+    "hidden_dim": 24,
+    "init_param_cov": 0.1
+  },
+  "algorithm": {
+    "method": "sgd",
+    "dynamics_decay": 0.999,
+    "learning_rate": 0.001,
+    "num_iter": 8,
+    "batch_size": 4
+  },
+  "plot": {
+    "color": "#ff7f0e",
+    "marker": "P",
+    "linestyle": "--",
+    "markersize": 8
+  }
+}

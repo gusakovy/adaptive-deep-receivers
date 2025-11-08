@@ -1,0 +1,27 @@
+{
+  "model": {
+    "type": "deepsic",
+    "num_layers": 3,
+    "hidden_dim": 24,
+    "init_param_cov": 0.1
+  },
+  "algorithm": {
+    "method": "bbb",
+    "covariance_type": "diag",
+    "linplugin": true,
+    "reparameterized": true,
+    "dynamics_decay": 0.999,
+    "obs_cov_scale": 0.1,
+    "process_noise": 0.001,
+    "num_samples": 1,
+    "empirical_fisher": false,
+    "learning_rate": 0.01,
+    "num_iter": 10
+  },
+  "plot": {
+    "color": "#1f77b4",
+    "marker": "^",
+    "linestyle": "-",
+    "markersize": 8
+  }
+}

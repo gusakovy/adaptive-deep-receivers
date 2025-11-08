@@ -1,0 +1,26 @@
+{
+  "model": {
+    "type": "resnet",
+    "num_layers": 3,
+    "hidden_dim": 24,
+    "init_param_cov": 0.1
+  },
+  "algorithm": {
+    "method": "bong",
+    "covariance_type": "dlr",
+    "rank": 10,
+    "linplugin": true,
+    "reparameterized": false,
+    "dynamics_decay": 0.999,
+    "obs_cov_scale": 0.1,
+    "process_noise": 0.001,
+    "num_samples": 1,
+    "empirical_fisher": false
+  },
+  "plot": {
+    "color": "#8c564b",
+    "marker": "*",
+    "linestyle": "--",
+    "markersize": 10
+  }
+}

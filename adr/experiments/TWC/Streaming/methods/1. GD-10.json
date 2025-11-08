@@ -1,0 +1,14 @@
+{
+  "algorithm": {
+    "method": "gd",
+    "dynamics_decay": 0.999,
+    "learning_rate": 0.02,
+    "num_iter": 10
+  },
+  "plot": {
+    "color": "#d62728",
+    "marker": "X",
+    "linestyle": "-",
+    "markersize": 8
+  }
+}
