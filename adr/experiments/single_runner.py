@@ -151,6 +151,11 @@ def create_model(config: dict[str, any], key: Array) -> Detector:
         num_layers=model_config['num_layers'],
         hidden_dim=model_config['hidden_dim']
     )
+    if config['algorithm'].get('init_params', None) is not None:
+        try:
+            model.load(config['algorithm']['init_params'])
+        except Exception as e:
+            print(f"Error loading initial parameters: {e}")
     return model
 
 def create_channel(config: dict[str, any]) -> UplinkMimoChannel:
