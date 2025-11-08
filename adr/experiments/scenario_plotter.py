@@ -206,6 +206,8 @@ def create_plot(
     y_param_name = y_param.replace('_', ' ').title()
     ax.set_xlabel(param_name if xlabel is None else xlabel, fontsize=20)
     ax.set_ylabel(y_param_name if ylabel is None else ylabel, fontsize=20)
+    ax.tick_params(axis='x', labelsize=14) 
+    ax.tick_params(axis='y', labelsize=14) 
     if log_scale:
         ax.set_yscale('log')
     if not no_title:
@@ -214,7 +216,7 @@ def create_plot(
     # remove the errorbars from the legend
     handles, labels = ax.get_legend_handles_labels()
     handles = [h[0] for h in handles]
-    ax.legend(handles, labels, loc='best', fontsize=15)
+    ax.legend(handles, labels, loc='best', fontsize=14)
     plt.tight_layout()
 
     if save_dir:
@@ -243,6 +245,21 @@ def run_experiments_for_time_series(
         results[config_name] = {'x_values': [], 'y_values': [], 'y_errors': []}
         plot_params[config_name] = get_plot_params(compared_configs[config_name])
         compared_configs[config_name].pop('plot', None)
+
+        # Check if this config has custom results
+        config = compared_configs[config_name]
+        if 'algorithm' in config and config['algorithm'].get('method') == 'custom_result' and 'results' in config['algorithm']:
+            # Handle custom results - use the provided results directly
+            custom_results = config['algorithm']['results']
+            if isinstance(custom_results, list) and len(custom_results) > 0:
+                time_indices = list(range(len(custom_results)))
+                results[config_name]['x_values'] = time_indices
+                results[config_name]['y_values'] = custom_results
+                results[config_name]['y_errors'] = None  # No error bars for custom results
+                continue
+            else:
+                print(f"Warning: Custom results for {config_name} are not a valid list")
+                continue
 
         # Create config for this combination
         config = base_config.copy()
@@ -368,6 +385,8 @@ def create_time_series_plot(
     y_param_name = y_param.replace('_', ' ').title()
     ax.set_xlabel('Channel Snapshot' if xlabel is None else xlabel, fontsize=20)
     ax.set_ylabel(y_param_name if ylabel is None else ylabel, fontsize=20)
+    ax.tick_params(axis='x', labelsize=14)
+    ax.tick_params(axis='y', labelsize=14) 
     if log_scale:
         ax.set_yscale('log')
     if not no_title:
